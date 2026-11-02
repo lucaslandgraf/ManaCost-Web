@@ -15,28 +15,28 @@ import { QrScannerModal } from './components/modals/QrScannerModal';
 // Páginas
 import { Dashboard } from './pages/Dashboard';
 import { DealsRadar } from './pages/DealsRadar/DealsRadar';
-import { Bills } from './pages/Bills';
-import { Trips } from './pages/Trips';
-
+import { Bills } from './pages/Bills/index';
+import { Trips } from './pages/Trips/index';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [auditOpen, setAuditOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
+  
+  // Gatilho de atualização para o Dashboard recarregar os dados
+  const [refreshKey, setRefreshKey] = useState(0);
 
   return (
     <MonthProvider>
       <BasketProvider>
         <div className="flex min-h-screen bg-[#0B0F19] text-[#F8FAFC]">
-          {/* Navegação Lateral Desktop */}
           <Sidebar
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             onOpenScanner={() => setScannerOpen(true)}
           />
 
-          {/* Área Principal de Conteúdo */}
           <div className="flex-1 flex flex-col min-w-0">
             <Header
               onOpenAudit={() => setAuditOpen(true)}
@@ -44,24 +44,28 @@ export default function App() {
             />
 
             <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 max-w-7xl w-full mx-auto">
-              {activeTab === 'dashboard' && <Dashboard />}
+              {/* O key={refreshKey} faz o Dashboard buscar as transações novas na hora */}
+              {activeTab === 'dashboard' && <Dashboard key={refreshKey} />}
               {activeTab === 'deals' && <DealsRadar />}
               {activeTab === 'bills' && <Bills />}
               {activeTab === 'trips' && <Trips />}
             </main>
           </div>
 
-          {/* Navegação Inferior Mobile */}
           <BottomNav
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             onOpenScanner={() => setScannerOpen(true)}
           />
 
-          {/* Modais Globais */}
           {auditOpen && <AuditModal onClose={() => setAuditOpen(false)} />}
           {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
-          {scannerOpen && <QrScannerModal onClose={() => setScannerOpen(false)} />}
+          {scannerOpen && (
+            <QrScannerModal
+              onClose={() => setScannerOpen(false)}
+              onSuccess={() => setRefreshKey((prev) => prev + 1)}
+            />
+          )}
         </div>
       </BasketProvider>
     </MonthProvider>
