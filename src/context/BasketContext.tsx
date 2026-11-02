@@ -1,12 +1,13 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
 export interface BasketItem {
   id: string;
   descricao: string;
   valor: number;
+  valorOriginal?: number | null;
   estabelecimento: {
     nome: string;
-    endereco: string;
+    endereco?: string;
   };
   quantidade: number;
 }
@@ -24,7 +25,18 @@ interface BasketContextData {
 const BasketContext = createContext<BasketContextData>({} as BasketContextData);
 
 export const BasketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [items, setItems] = useState<BasketItem[]>([]);
+  const [items, setItems] = useState<BasketItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('manacost_basket');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem('manacost_basket', JSON.stringify(items));
+  }, [items]);
 
   const addItem = (newItem: Omit<BasketItem, 'quantidade'>) => {
     setItems((prev) => {

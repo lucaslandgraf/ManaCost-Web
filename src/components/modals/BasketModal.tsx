@@ -1,6 +1,5 @@
-// src/components/modals/BasketModal.tsx
 import React, { useMemo } from 'react';
-import { X, MapPin, Trash2, Plus, Minus, Share2 } from 'lucide-react';
+import { X, Trash2, Plus, Minus, MapPin, Share2, ShoppingBag } from 'lucide-react';
 import { useBasket } from '../../context/BasketContext';
 
 interface BasketModalProps {
@@ -9,22 +8,16 @@ interface BasketModalProps {
 }
 
 export const BasketModal: React.FC<BasketModalProps> = ({ isOpen, onClose }) => {
-  const { items, removeItem, updateQuantity, clearBasket, totalPrice } = useBasket();
+  const { items, removeItem, updateQuantity, clearBasket, totalPrice, totalItems } = useBasket();
 
-  // 1. Agrupamento e cálculo por supermercado
   const storeSplits = useMemo(() => {
     if (items.length === 0) return [];
-
     const map: Record<string, { total: number; count: number }> = {};
 
-    items.forEach((item: any) => {
-      const store =
-        item.estabelecimento?.nome ||
-        item.cheapest_store ||
-        item.store_name ||
-        'Supermercado';
-      const price = Number(item.valor ?? item.min_price) || 0;
-      const qty = Number(item.quantidade) || 1;
+    items.forEach((item) => {
+      const store = item.estabelecimento?.nome || 'Mercado Geral';
+      const price = Number(item.valor) || 0;
+      const qty = item.quantidade || 1;
 
       if (!map[store]) {
         map[store] = { total: 0, count: 0 };
@@ -40,17 +33,12 @@ export const BasketModal: React.FC<BasketModalProps> = ({ isOpen, onClose }) => 
     }));
   }, [items]);
 
-  // 2. Exportação de texto formatado para WhatsApp ou Clipboard
-  const handleShareList = async () => {
+  const handleShareWhatsApp = () => {
     if (items.length === 0) return;
 
-    const itemsByStore: Record<string, any[]> = {};
-    items.forEach((item: any) => {
-      const store =
-        item.estabelecimento?.nome ||
-        item.cheapest_store ||
-        item.store_name ||
-        'Geral';
+    const itemsByStore: Record<string, typeof items> = {};
+    items.forEach((item) => {
+      const store = item.estabelecimento?.nome || 'Mercado Geral';
       if (!itemsByStore[store]) itemsByStore[store] = [];
       itemsByStore[store].push(item);
     });
@@ -58,179 +46,156 @@ export const BasketModal: React.FC<BasketModalProps> = ({ isOpen, onClose }) => 
     let message = '🛒 *Lista de Compras • ManaCost*\n\n';
 
     Object.entries(itemsByStore).forEach(([store, storeItems]) => {
-      const storeTotal = storeItems.reduce((acc, it) => {
-        const p = Number(it.valor ?? it.min_price) || 0;
-        const q = Number(it.quantidade) || 1;
-        return acc + p * q;
-      }, 0);
-
+      const storeTotal = storeItems.reduce((acc, it) => acc + it.valor * it.quantidade, 0);
       message += `📍 *${store.toUpperCase()}* (Total: R$ ${storeTotal.toFixed(2).replace('.', ',')})\n`;
-
       storeItems.forEach((it) => {
-        const p = Number(it.valor ?? it.min_price) || 0;
-        const q = Number(it.quantidade) || 1;
-        const name = it.descricao || it.display_name || 'Item';
-        message += `  • ${q}x ${name} - R$ ${(p * q).toFixed(2).replace('.', ',')}\n`;
+        message += `  • ${it.quantidade}x ${it.descricao} - R$ ${(it.valor * it.quantidade).toFixed(2).replace('.', ',')}\n`;
       });
       message += '\n';
     });
 
     message += `💰 *TOTAL GERAL: R$ ${totalPrice.toFixed(2).replace('.', ',')}*`;
 
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: 'Lista de Compras', text: message });
-      } catch (_) {
-        // Fallback para clipboard
-        await navigator.clipboard.writeText(message);
-        alert('Lista copiada para a área de transferência!');
-      }
-    } else {
-      await navigator.clipboard.writeText(message);
-      alert('Lista copiada para a área de transferência!');
-    }
+    const encoded = encodeURIComponent(message);
+    window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-      <div className="w-full max-w-lg bg-[#131927] border border-[#1E293B] rounded-2xl p-6 shadow-2xl relative flex flex-col max-h-[85vh]">
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="w-full max-w-md bg-[#0B0F19] border-l border-white/10 h-full flex flex-col shadow-2xl">
         {/* Cabeçalho */}
-        <div className="flex items-center justify-between pb-4 border-b border-[#1E293B]">
-          <div>
-            <h2 className="text-lg font-bold text-[#F8FAFC]">Cesta de Compras</h2>
-            <p className="text-xs text-[#64748B]">Divisão prática e roteiro por supermercado</p>
+        <div className="flex items-center justify-between p-5 border-b border-white/5 bg-[#131927]">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
+              <ShoppingBag className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-100">Cesta de Compras</h2>
+              <p className="text-xs text-slate-400">
+                {totalItems} {totalItems === 1 ? 'item selecionado' : 'itens selecionados'}
+              </p>
+            </div>
           </div>
-          <button onClick={onClose} className="p-1 text-[#94A3B8] hover:text-[#F8FAFC]">
-            <X size={18} />
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+          >
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Resumo por Loja (Chips horizontais) */}
+        {/* Resumo por Loja */}
         {storeSplits.length > 0 && (
-          <div className="py-3 border-b border-[#1E293B] space-y-2">
-            <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider block">
-              Divisão de Compras por Loja
-            </span>
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {storeSplits.map((split) => (
+          <div className="p-4 border-b border-white/5 bg-[#0e1422]">
+            <p className="text-[10px] font-bold text-slate-500 tracking-wider uppercase mb-2">
+              Divisão por Supermercado
+            </p>
+            <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {storeSplits.map((store) => (
                 <div
-                  key={split.store_name}
-                  className="bg-[#0B0F19] border border-[#1E293B] rounded-xl px-3 py-2 shrink-0"
+                  key={store.store_name}
+                  className="bg-[#131927] border border-white/5 rounded-lg p-2.5 min-w-[170px] shrink-0"
                 >
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-[#F8FAFC]">
-                    <MapPin size={12} className="text-[#10B981]" />
-                    {split.store_name}
+                  <div className="flex items-center gap-1.5 text-xs text-slate-200 font-semibold truncate mb-1">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="truncate">{store.store_name}</span>
                   </div>
-                  <div className="text-[11px] text-[#94A3B8] mt-0.5">
-                    {split.items_count} {split.items_count === 1 ? 'item' : 'itens'} •{' '}
-                    <span className="font-bold text-[#34D399]">
-                      R$ {split.total_price.toFixed(2).replace('.', ',')}
+                  <p className="text-[11px] text-slate-400">
+                    {store.items_count} un •{' '}
+                    <span className="text-emerald-400 font-bold">
+                      R$ {store.total_price.toFixed(2).replace('.', ',')}
                     </span>
-                  </div>
+                  </p>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* Lista de Itens com scroll próprio */}
-        <div className="flex-1 overflow-y-auto py-3 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[#94A3B8] font-semibold">
-              Itens selecionados ({items.length})
-            </span>
-            {items.length > 0 && (
-              <button
-                onClick={() => {
-                  if (confirm('Deseja limpar todos os itens da cesta?')) clearBasket();
-                }}
-                className="text-xs text-[#F43F5E] hover:underline"
-              >
-                Limpar Tudo
-              </button>
-            )}
-          </div>
-
+        {/* Lista de Produtos */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {items.length === 0 ? (
-            <div className="py-12 text-center text-xs text-[#64748B]">
-              A sua cesta está vazia no momento.
+            <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500">
+              <ShoppingBag className="w-12 h-12 mb-3 stroke-[1.5] text-slate-600" />
+              <p className="text-sm font-semibold text-slate-300">A sua cesta está vazia</p>
+              <p className="text-xs mt-1 text-slate-500">
+                Adicione itens pesquisados na SEFAZ ou nas ofertas para montar o seu roteiro.
+              </p>
             </div>
           ) : (
-            items.map((item: any) => {
-              const price = Number(item.valor ?? item.min_price) || 0;
-              const store =
-                item.estabelecimento?.nome ||
-                item.cheapest_store ||
-                item.store_name ||
-                'Supermercado';
-              const name = item.descricao || item.display_name || 'Produto';
-              const qty = Number(item.quantidade) || 1;
-
-              return (
-                <div
-                  key={item.id}
-                  className="bg-[#0B0F19] border border-[#1E293B] rounded-xl p-3 flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <h4 className="text-xs font-bold text-[#F8FAFC] truncate">{name}</h4>
-                    <p className="text-[11px] text-[#64748B]">
-                      R$ {price.toFixed(2).replace('.', ',')} un • {store}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center bg-[#131927] border border-[#1E293B] rounded-lg">
-                      <button
-                        onClick={() => updateQuantity(item.id, -1)}
-                        className="p-1 hover:text-[#10B981] text-[#94A3B8]"
-                      >
-                        <Minus size={13} />
-                      </button>
-                      <span className="px-2 text-xs font-bold text-[#F8FAFC]">{qty}</span>
-                      <button
-                        onClick={() => updateQuantity(item.id, 1)}
-                        className="p-1 hover:text-[#10B981] text-[#94A3B8]"
-                      >
-                        <Plus size={13} />
-                      </button>
-                    </div>
-
-                    <button
-                      onClick={() => removeItem(item.id)}
-                      className="p-1.5 rounded-lg bg-[#F43F5E]/10 text-[#F43F5E] hover:bg-[#F43F5E]/20"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
+            items.map((item) => (
+              <div
+                key={item.id}
+                className="bg-[#131927] border border-white/5 rounded-xl p-3 flex items-center justify-between gap-3 hover:border-white/10 transition"
+              >
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-xs font-semibold text-slate-100 truncate">{item.descricao}</h4>
+                  <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                    R$ {item.valor.toFixed(2).replace('.', ',')} un • {item.estabelecimento.nome}
+                  </p>
+                  <p className="text-[11px] font-bold text-emerald-400 mt-1">
+                    Subtotal: R$ {(item.valor * item.quantidade).toFixed(2).replace('.', ',')}
+                  </p>
                 </div>
-              );
-            })
+
+                <div className="flex items-center gap-1.5 bg-[#0B0F19] border border-white/5 rounded-lg p-1">
+                  <button
+                    onClick={() => updateQuantity(item.id, -1)}
+                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-xs font-bold text-slate-200 min-w-[18px] text-center">
+                    {item.quantidade}
+                  </span>
+                  <button
+                    onClick={() => updateQuantity(item.id, 1)}
+                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => removeItem(item.id)}
+                    className="p-1 rounded text-rose-400 hover:bg-rose-500/10 ml-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))
           )}
         </div>
 
-        {/* Rodapé com Total e Botão de Ação */}
+        {/* Rodapé / Checkout */}
         {items.length > 0 && (
-          <div className="pt-4 border-t border-[#1E293B] space-y-3">
+          <div className="p-4 border-t border-white/5 bg-[#131927] space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-xs text-[#94A3B8] block">Total Geral</span>
-                <span className="text-[11px] text-[#64748B]">
-                  {storeSplits.length} {storeSplits.length === 1 ? 'loja' : 'lojas diferentes'}
-                </span>
+                <p className="text-xs text-slate-400">Total Previsto</p>
+                <p className="text-[10px] text-slate-500">{storeSplits.length} locais de compra</p>
               </div>
-              <span className="text-xl font-extrabold text-[#34D399]">
+              <p className="text-xl font-extrabold text-emerald-400">
                 R$ {totalPrice.toFixed(2).replace('.', ',')}
-              </span>
+              </p>
             </div>
 
-            <button
-              onClick={handleShareList}
-              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-bold bg-[#10B981] text-[#0B0F19] hover:bg-[#34D399] transition-all"
-            >
-              <Share2 size={14} /> Exportar Lista / WhatsApp
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={clearBasket}
+                className="px-3 py-2.5 rounded-xl border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 text-xs font-semibold transition"
+              >
+                Limpar
+              </button>
+              <button
+                onClick={handleShareWhatsApp}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition"
+              >
+                <Share2 className="w-4 h-4" />
+                Exportar para WhatsApp
+              </button>
+            </div>
           </div>
         )}
       </div>

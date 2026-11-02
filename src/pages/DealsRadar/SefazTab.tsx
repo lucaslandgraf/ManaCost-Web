@@ -1,9 +1,10 @@
 // src/pages/DealsRadar/SefazTab.tsx
 import React, { useState, useEffect } from 'react';
-import { MapPin, Clock, Search, ArrowUpDown, Plus, Check, Loader2, Navigation } from 'lucide-react';
+import { MapPin, Clock, Search, ArrowUpDown, Plus, Check, Loader2, Navigation, ShoppingBag } from 'lucide-react';
 import { searchSefazProducts } from '../../services/sefazService';
 import type { SefazProduct } from '../../types/database';
 import { useBasket } from '../../context/BasketContext';
+import { BasketModal } from '../../components/modals/BasketModal';
 
 const PRESETS = ['Gasolina Comum', 'Etanol', 'Arroz 5kg', 'Leite Integral', 'Café 500g', 'Ovos'];
 const RADIUS = [5, 10, 15, 20];
@@ -15,8 +16,9 @@ export const SefazTab: React.FC = () => {
   const [results, setResults] = useState<SefazProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isBasketOpen, setIsBasketOpen] = useState(false);
 
-  const { items, addItem, removeItem } = useBasket();
+  const { items, addItem, removeItem, totalItems } = useBasket();
 
   const handleSearch = async (termToSearch?: string) => {
     const term = (termToSearch || searchTerm).trim();
@@ -57,8 +59,8 @@ export const SefazTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Barra de Pesquisa */}
-      <div className="flex gap-2">
+      {/* Barra de Pesquisa e Botão da Cesta */}
+      <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3.5 top-3.5 text-[#64748B]" />
           <input
@@ -70,11 +72,26 @@ export const SefazTab: React.FC = () => {
             className="w-full bg-[#131927] border border-[#1E293B] rounded-xl pl-10 pr-4 py-2.5 text-xs text-[#F8FAFC] placeholder-[#64748B] focus:outline-none focus:border-[#10B981]"
           />
         </div>
+
         <button
           onClick={() => handleSearch()}
           className="px-5 py-2.5 rounded-xl text-xs font-bold bg-[#10B981] text-[#0B0F19] hover:bg-[#34D399] transition-all"
         >
           Buscar
+        </button>
+
+        {/* Botão Ver Cesta */}
+        <button
+          onClick={() => setIsBasketOpen(true)}
+          className="flex items-center gap-2 px-4 py-2.5 bg-[#131927] border border-[#10B981]/40 rounded-xl text-xs font-bold text-[#10B981] hover:bg-[#10B981]/10 transition-all shrink-0"
+        >
+          <ShoppingBag size={15} />
+          <span>Cesta</span>
+          {totalItems > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-[#10B981] text-[#0B0F19] text-[10px] font-extrabold">
+              {totalItems}
+            </span>
+          )}
         </button>
       </div>
 
@@ -200,7 +217,7 @@ export const SefazTab: React.FC = () => {
                     </span>
                     {item.distanciaKm && (
                       <span className="text-xs font-semibold text-[#38BDF8]">
-                        {item.distanciaKm} km
+                        {item.distanciaKm.includes('km') ? item.distanciaKm : `${item.distanciaKm} km`}
                       </span>
                     )}
                   </div>
@@ -253,6 +270,9 @@ export const SefazTab: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* Gaveta Lateral da Cesta */}
+      <BasketModal isOpen={isBasketOpen} onClose={() => setIsBasketOpen(false)} />
     </div>
   );
 };
