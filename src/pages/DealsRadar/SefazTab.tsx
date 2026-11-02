@@ -1,7 +1,7 @@
 // src/pages/DealsRadar/SefazTab.tsx
 import React, { useState, useEffect } from 'react';
 import { MapPin, Clock, Search, ArrowUpDown, Plus, Check, Loader2, Navigation } from 'lucide-react';
-import { searchSefazPrices } from '../../services/sefazService';
+import { searchSefazProducts } from '../../services/sefazService';
 import type { SefazProduct } from '../../types/database';
 import { useBasket } from '../../context/BasketContext';
 
@@ -25,7 +25,7 @@ export const SefazTab: React.FC = () => {
     setLoading(true);
     setErrorMsg('');
     try {
-      const data = await searchSefazPrices(term, radius);
+      const data = await searchSefazProducts(term, radius);
       setResults(data);
     } catch {
       setErrorMsg('Não foi possível carregar notas fiscais em tempo real da SEFAZ-PR.');

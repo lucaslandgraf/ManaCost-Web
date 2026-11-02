@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Loader2, Wallet } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { ArrowDownLeft, ArrowUpRight, Loader2, Wallet, Plus, Minus } from 'lucide-react';
 import { useMonth } from '../context/MonthContext';
 import { supabase } from '../services/supabase';
+import { TransactionModal } from '../components/modals/TransactionModal';
 
 type TransactionType = 'income' | 'expense';
 
@@ -26,60 +27,55 @@ export const Dashboard: React.FC = () => {
   const [transactions, setTransactions] = useState<DashboardTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isTxModalOpen, setIsTxModalOpen] = useState(false);
+  const [txModalType, setTxModalType] = useState<'income' | 'expense'>('expense');
+
+  const fetchTransactions = useCallback(async () => {
+    setLoading(true);
+    setErrorMsg('');
+
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('id, description, amount, date, type')
+        .in('type', ['income', 'expense'])
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .order('date', { ascending: false });
+
+      if (error) throw error;
+
+      const mappedTransactions: DashboardTransaction[] = (data || []).map((transaction) => ({
+        id: String(transaction.id),
+        description: transaction.description?.trim() || 'Movimento sem descrição',
+        amount: Number(transaction.amount) || 0,
+        date: transaction.date,
+        type: transaction.type,
+      }));
+
+      setTransactions(mappedTransactions);
+    } catch (error) {
+      console.error('Erro ao carregar movimentos do painel:', error);
+      setTransactions([]);
+      setErrorMsg(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível carregar os movimentos deste mês.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [currentDate]);
 
   useEffect(() => {
-    let active = true;
-
-    const fetchTransactions = async () => {
-      setLoading(true);
-      setErrorMsg('');
-
-      const year = currentDate.getFullYear();
-      const month = currentDate.getMonth();
-      const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
-      const lastDay = new Date(year, month + 1, 0).getDate();
-      const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-
-      try {
-        const { data, error } = await supabase
-          .from('transactions')
-          .select('id, description, amount, date, type')
-          .in('type', ['income', 'expense'])
-          .gte('date', startDate)
-          .lte('date', endDate)
-          .order('date', { ascending: false });
-
-        if (error) throw error;
-
-        const mappedTransactions: DashboardTransaction[] = (data || []).map((transaction) => ({
-          id: String(transaction.id),
-          description: transaction.description?.trim() || 'Movimento sem descrição',
-          amount: Number(transaction.amount) || 0,
-          date: transaction.date,
-          type: transaction.type,
-        }));
-
-        if (active) setTransactions(mappedTransactions);
-      } catch (error) {
-        console.error('Erro ao carregar movimentos do painel:', error);
-        if (active) {
-          setTransactions([]);
-          setErrorMsg(
-            error instanceof Error
-              ? error.message
-              : 'Não foi possível carregar os movimentos deste mês.'
-          );
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
     void fetchTransactions();
-    return () => {
-      active = false;
-    };
-  }, [currentDate]);
+  }, [fetchTransactions]);
 
   const incomeTotal = transactions
     .filter((transaction) => transaction.type === 'income')
@@ -91,9 +87,36 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[#F8FAFC]">Visão geral</h1>
-        <p className="mt-1 text-xs text-[#64748B]">Resumo financeiro de {formattedMonth}</p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-[#F8FAFC]">Visão geral</h1>
+          <p className="mt-1 text-xs text-[#64748B]">Resumo financeiro de {formattedMonth}</p>
+        </div>
+
+        {/* Botões de Ação Rápida */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setTxModalType('income');
+              setIsTxModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#10B981]/15 border border-[#10B981]/30 text-[#10B981] text-xs font-bold hover:bg-[#10B981]/25 transition-all"
+          >
+            <Plus size={14} />
+            Receita
+          </button>
+
+          <button
+            onClick={() => {
+              setTxModalType('expense');
+              setIsTxModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#F43F5E]/15 border border-[#F43F5E]/30 text-[#FB7185] text-xs font-bold hover:bg-[#F43F5E]/25 transition-all"
+          >
+            <Minus size={14} />
+            Despesa
+          </button>
+        </div>
       </div>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-3" aria-label="Resumo financeiro">
@@ -162,6 +185,17 @@ export const Dashboard: React.FC = () => {
           </div>
         )}
       </section>
+
+      {/* Modal de Registo de Transações */}
+      <TransactionModal
+        isOpen={isTxModalOpen}
+        initialType={txModalType}
+        currentMonthDate={currentDate}
+        onClose={() => setIsTxModalOpen(false)}
+        onSuccess={() => {
+          void fetchTransactions();
+        }}
+      />
     </div>
   );
 };

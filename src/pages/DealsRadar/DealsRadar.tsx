@@ -8,6 +8,7 @@ import { SefazTab } from './SefazTab';
 import { useBasket } from '../../context/BasketContext';
 import { BasketModal } from '../../components/modals/BasketModal';
 
+
 export type RadarTab = 'matches' | 'catalog' | 'flyers' | 'sefaz';
 
 export const DealsRadar: React.FC = () => {

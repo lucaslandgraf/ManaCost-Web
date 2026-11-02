@@ -1,76 +1,54 @@
-// api/sefaz.ts
-export default async function handler(req: any, res: any) {
-  // Configuração de CORS para permitir requisições do front web
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Configuração de cabeçalhos CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
   );
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
-  const { local, termo, raio = '10', offset = '0' } = req.query;
+  const { termo, geohash, raio, offset } = req.query;
 
-  if (!local || !termo) {
-    return res.status(400).json({ error: 'Parâmetros "local" e "termo" são obrigatórios.' });
+  if (!termo || !geohash) {
+    return res.status(400).json({ error: 'Parâmetros "termo" e "geohash" são obrigatórios.' });
   }
 
   try {
-    const browserHeaders = {
-      'Accept': 'application/json, text/plain, */*',
-      'Accept-Language': 'pt-BR,pt;q=0.9',
-      'Referer': `https://menorpreco.notaparana.pr.gov.br/app?termo=${encodeURIComponent(termo)}&local=${local}`,
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    };
+    const targetUrl = new URL('https://menorpreco.notaparana.pr.gov.br/api/v1/produtos');
+    targetUrl.searchParams.set('termo', String(termo));
+    targetUrl.searchParams.set('local', String(geohash));
+    targetUrl.searchParams.set('raio', String(raio || '15'));
+    targetUrl.searchParams.set('offset', String(offset || '0'));
+    targetUrl.searchParams.set('ordem', '0'); // Menor preço
 
-    // 1. Tenta obter o ID da categoria base
-    const termoBase = String(termo).split(' ')[0];
-    let catId = '';
-    try {
-      const catRes = await fetch(
-        `https://menorpreco.notaparana.pr.gov.br/api/v1/categorias?local=${local}&termo=${encodeURIComponent(termoBase)}&raio=${raio}`,
-        { headers: browserHeaders }
-      );
-      if (catRes.ok) {
-        const catData = await catRes.json();
-        const listaCats = catData?.categorias || (Array.isArray(catData) ? catData : []);
-        if (listaCats.length > 0) {
-          catId = String(listaCats[0].id || listaCats[0].codigo || '');
-        }
-      }
-    } catch (_) {}
-
-    // 2. Consulta produtos
-    const prodParams = new URLSearchParams({
-      local: String(local),
-      termo: String(termo),
-      offset: String(offset),
-      raio: String(raio),
-      data: '-1',
-      ordem: '0',
+    const response = await fetch(targetUrl.toString(), {
+      method: 'GET',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://menorpreco.notaparana.pr.gov.br/',
+      },
     });
 
-    if (catId) {
-      prodParams.append('categoria', catId);
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: `Erro retornado pelo Menor Preço Paraná: ${response.statusText}`,
+      });
     }
 
-    const prodRes = await fetch(
-      `https://menorpreco.notaparana.pr.gov.br/api/v1/produtos?${prodParams.toString()}`,
-      { method: 'GET', headers: browserHeaders }
-    );
-
-    if (!prodRes.ok) {
-      return res.status(prodRes.status).json({ error: `Erro SEFAZ: ${prodRes.statusText}` });
-    }
-
-    const data = await prodRes.json();
+    const data = await response.json();
     return res.status(200).json(data);
   } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Falha ao consultar SEFAZ-PR' });
+    console.error('Erro no proxy da SEFAZ:', error);
+    return res.status(500).json({ error: error.message || 'Falha interna ao consultar a SEFAZ-PR.' });
   }
 }
