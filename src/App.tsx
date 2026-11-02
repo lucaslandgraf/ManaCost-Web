@@ -18,6 +18,7 @@ import { DealsRadar } from './pages/DealsRadar/DealsRadar';
 import { Bills } from './pages/Bills';
 import { Trips } from './pages/Trips';
 
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [auditOpen, setAuditOpen] = useState(false);
