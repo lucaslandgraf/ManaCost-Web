@@ -66,9 +66,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAudit, onOpenSettings, cur
         <div className="flex items-center gap-2">
           {user ? (
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-[#64748B] hidden md:inline truncate max-w-[150px]">
-                {user.email}
-              </span>
               <button
                 onClick={handleLogout}
                 title="Sair"

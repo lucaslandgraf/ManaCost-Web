@@ -17,6 +17,8 @@ import {
   CheckCircle2,
   Clock,
   Trash2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { useMonth } from '../context/MonthContext';
 import { supabase } from '../services/supabase';
@@ -35,6 +37,8 @@ interface DashboardTransaction {
   spent_for_name?: string | null;
   category_name?: string;
 }
+
+const ITEMS_PER_PAGE = 20;
 
 const formatCurrency = (amount: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount);
@@ -84,6 +88,9 @@ export const Dashboard: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [txModalType, setTxModalType] = useState<TransactionType>('expense');
+
+  // Estado de paginação do extrato
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Modal de Detalhes da Compra / Lançamento
   const [selectedTx, setSelectedTx] = useState<DashboardTransaction | null>(null);
@@ -136,6 +143,7 @@ export const Dashboard: React.FC = () => {
   }, [currentDate]);
 
   useEffect(() => {
+    setCurrentPage(1); // Volta para a primeira página ao trocar de mês
     void fetchTransactions();
   }, [fetchTransactions]);
 
@@ -155,6 +163,7 @@ export const Dashboard: React.FC = () => {
     await supabase.from('transactions').delete().eq('id', id);
   };
 
+  // Cálculos contábeis consideram 100% dos lançamentos do mês
   const incomeTotal = transactions
     .filter((t) => t.type === 'income')
     .reduce((total, t) => total + t.amount, 0);
@@ -162,6 +171,13 @@ export const Dashboard: React.FC = () => {
     .filter((t) => t.type === 'expense')
     .reduce((total, t) => total + t.amount, 0);
   const balance = incomeTotal - expenseTotal;
+
+  // Fatiamento apenas para exibição em tela
+  const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE) || 1;
+  const paginatedTransactions = transactions.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
 
   return (
     <div className="space-y-6">
@@ -244,75 +260,112 @@ export const Dashboard: React.FC = () => {
             Nenhum movimento registrado neste mês.
           </div>
         ) : (
-          <div className="divide-y divide-[#1E293B]/60">
-            {transactions.map((transaction) => {
-              const isIncome = transaction.type === 'income';
-              return (
-                <div
-                  key={transaction.id}
-                  onClick={() => setSelectedTx(transaction)}
-                  className="flex items-center justify-between gap-4 py-3 hover:bg-[#1E293B]/30 px-2 rounded-xl transition cursor-pointer"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-[#0B0F19] border border-white/5 flex items-center justify-center shrink-0">
-                      {getTransactionIcon(transaction.description)}
+          <>
+            <div className="divide-y divide-[#1E293B]/60">
+              {paginatedTransactions.map((transaction) => {
+                const isIncome = transaction.type === 'income';
+                return (
+                  <div
+                    key={transaction.id}
+                    onClick={() => setSelectedTx(transaction)}
+                    className="flex items-center justify-between gap-4 py-3 hover:bg-[#1E293B]/30 px-2 rounded-xl transition cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-[#0B0F19] border border-white/5 flex items-center justify-center shrink-0">
+                        {getTransactionIcon(transaction.description)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-bold text-[#F8FAFC]">
+                          {transaction.description}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-[#64748B]">
+                          {transaction.category_name} • {formatDate(transaction.date)}
+                          {transaction.spent_for_name && (
+                            <span className="ml-2 text-amber-400 font-semibold">
+                              (Para: {transaction.spent_for_name})
+                            </span>
+                          )}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-bold text-[#F8FAFC]">
-                        {transaction.description}
-                      </p>
-                      <p className="mt-0.5 text-[11px] text-[#64748B]">
-                        {transaction.category_name} • {formatDate(transaction.date)}
-                        {transaction.spent_for_name && (
-                          <span className="ml-2 text-amber-400 font-semibold">
-                            (Para: {transaction.spent_for_name})
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-3 shrink-0">
-                    <div className="text-right">
-                      <p
-                        className={`text-xs font-black ${
-                          isIncome ? 'text-[#10B981]' : 'text-[#F8FAFC]'
-                        }`}
-                      >
-                        {isIncome ? '+' : '-'} {formatCurrency(transaction.amount)}
-                      </p>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right">
+                        <p
+                          className={`text-xs font-black ${
+                            isIncome ? 'text-[#10B981]' : 'text-[#F8FAFC]'
+                          }`}
+                        >
+                          {isIncome ? '+' : '-'} {formatCurrency(transaction.amount)}
+                        </p>
+                        <button
+                          onClick={(e) => toggleSettled(transaction.id, transaction.is_settled, e)}
+                          className={`mt-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded flex items-center gap-1 ml-auto ${
+                            transaction.is_settled
+                              ? 'bg-[#10B981]/15 text-[#10B981]'
+                              : 'bg-amber-500/15 text-amber-400'
+                          }`}
+                        >
+                          {transaction.is_settled ? (
+                            <>
+                              <CheckCircle2 size={10} /> Efetivado
+                            </>
+                          ) : (
+                            <>
+                              <Clock size={10} /> Pendente
+                            </>
+                          )}
+                        </button>
+                      </div>
+
                       <button
-                        onClick={(e) => toggleSettled(transaction.id, transaction.is_settled, e)}
-                        className={`mt-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded flex items-center gap-1 ml-auto ${
-                          transaction.is_settled
-                            ? 'bg-[#10B981]/15 text-[#10B981]'
-                            : 'bg-amber-500/15 text-amber-400'
-                        }`}
+                        onClick={(e) => handleDeleteTransaction(transaction.id, transaction.description, e)}
+                        className="p-1 text-[#64748B] hover:text-[#F43F5E] transition"
+                        title="Excluir lançamento"
                       >
-                        {transaction.is_settled ? (
-                          <>
-                            <CheckCircle2 size={10} /> Efetivado
-                          </>
-                        ) : (
-                          <>
-                            <Clock size={10} /> Pendente
-                          </>
-                        )}
+                        <Trash2 size={13} />
                       </button>
                     </div>
-
-                    <button
-                      onClick={(e) => handleDeleteTransaction(transaction.id, transaction.description, e)}
-                      className="p-1 text-[#64748B] hover:text-[#F43F5E] transition"
-                      title="Excluir lançamento"
-                    >
-                      <Trash2 size={13} />
-                    </button>
                   </div>
+                );
+              })}
+            </div>
+
+            {/* Barra de Navegação de Páginas */}
+            {transactions.length > ITEMS_PER_PAGE && (
+              <div className="flex items-center justify-between pt-4 mt-2 border-t border-[#1E293B]/60 text-xs text-[#94A3B8]">
+                <span>
+                  Exibindo {(currentPage - 1) * ITEMS_PER_PAGE + 1}–
+                  {Math.min(currentPage * ITEMS_PER_PAGE, transactions.length)} de{' '}
+                  {transactions.length}
+                </span>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="p-1.5 rounded-xl bg-[#0B0F19] border border-white/5 text-slate-300 hover:text-white disabled:opacity-40 disabled:hover:text-slate-300 transition"
+                    title="Página anterior"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+
+                  <span className="font-semibold text-slate-200 px-1 text-[11px]">
+                    {currentPage} / {totalPages}
+                  </span>
+
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    className="p-1.5 rounded-xl bg-[#0B0F19] border border-white/5 text-slate-300 hover:text-white disabled:opacity-40 disabled:hover:text-slate-300 transition"
+                    title="Próxima página"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            )}
+          </>
         )}
       </section>
 

@@ -28,12 +28,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <aside className="hidden md:flex flex-col w-64 bg-[#0B0F19] border-r border-[#1E293B] h-screen sticky top-0 p-5">
       {/* Brand Header */}
-      <div className="flex items-center gap-3 px-2 mb-8">
-        <div className="w-9 h-9 rounded-xl bg-[#10B981] flex items-center justify-center text-[#0B0F19]">
-          <ShoppingBag size={20} strokeWidth={2.5} />
-        </div>
-        <span className="font-extrabold text-lg tracking-tight text-[#F8FAFC]">ManaCost</span>
-      </div>
+      {/* Substitua pelo ícone da aplicação: */}
+<div className="flex items-center gap-3 px-2 mb-8">
+  <img 
+    src="/icon.png" 
+    alt="ManaCost" 
+    className="w-10 h-10 rounded-xl object-contain drop-shadow-[0_4px_12px_rgba(16,185,129,0.25)]" 
+  />
+  <span className="text-lg font-black tracking-tight text-white">ManaCost</span>
+</div>
 
       {/* Navegação Primária */}
       <nav className="flex flex-col gap-1.5 flex-1">

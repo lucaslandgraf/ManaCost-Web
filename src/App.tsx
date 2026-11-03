@@ -1,6 +1,6 @@
-// src/App.tsx
 import { useState } from 'react';
-import { ShoppingCart } from 'lucide-react';
+import { ShoppingCart, Loader2 } from 'lucide-react';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { MonthProvider } from './context/MonthContext';
 import { BasketProvider, useBasket } from './context/BasketContext';
 import { Sidebar } from './components/layout/Sidebar';
@@ -8,6 +8,9 @@ import type { NavTab } from './components/layout/Sidebar';
 import { BottomNav } from './components/layout/BottomNav';
 import { Header } from './components/layout/Header';
 import { BasketDrawer } from './components/basket/BasketDrawer';
+
+// Autenticação
+import { Login } from './pages/Auth/Login';
 
 // Modais
 import { AuditModal } from './components/modals/AuditModal';
@@ -21,6 +24,8 @@ import { Bills } from './pages/Bills/index';
 import { Trips } from './pages/Trips/index';
 
 function AppContent() {
+  const { session, loading } = useAuth();
+
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [auditOpen, setAuditOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -30,6 +35,22 @@ function AppContent() {
 
   const { items } = useBasket();
 
+  // 1. Tela de carregamento enquanto valida a sessão no Supabase
+  if (loading) {
+    return (
+      <div className="min-h-screen w-full bg-[#0B0F19] flex flex-col items-center justify-center gap-3 text-slate-400 select-none">
+        <Loader2 size={24} className="animate-spin text-emerald-400" />
+        <span className="text-xs font-medium">Carregando ManaCost...</span>
+      </div>
+    );
+  }
+
+  // 2. Se não houver sessão ativa, exibe a tela de Login
+  if (!session) {
+    return <Login />;
+  }
+
+  // 3. Usuário autenticado: renderiza a aplicação normalmente
   return (
     <div className="flex min-h-screen bg-[#0B0F19] text-[#F8FAFC]">
       <Sidebar
@@ -92,10 +113,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <MonthProvider>
-      <BasketProvider>
-        <AppContent />
-      </BasketProvider>
-    </MonthProvider>
+    <AuthProvider>
+      <MonthProvider>
+        <BasketProvider>
+          <AppContent />
+        </BasketProvider>
+      </MonthProvider>
+    </AuthProvider>
   );
 }
