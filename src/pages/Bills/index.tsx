@@ -1,23 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
+  ReceiptText,
+  Repeat,
+  Plus,
+  CheckCircle2,
+  Clock,
+  Trash2,
+  Edit2,
+  Share2,
+  FileSpreadsheet,
+  Copy,
+  Check,
   ChevronLeft,
   ChevronRight,
-  Clock,
-  Plus,
-  Share2,
-  Check,
-  Edit2,
-  Trash2,
-  Copy,
-  Calendar,
-  Repeat,
-  X,
-  Play,
-  Pause,
+  Loader2,
+  Zap,
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
+import { useMonth } from '../../context/MonthContext';
 
-interface BillToPay {
+export interface BillToPay {
   id: string;
   title: string;
   amount: number;
@@ -26,7 +28,7 @@ interface BillToPay {
   barcode_or_pix?: string | null;
 }
 
-interface RecurringBill {
+export interface RecurringBill {
   id: string;
   description: string;
   amount: number;
@@ -38,99 +40,112 @@ interface RecurringBill {
 }
 
 export const Bills: React.FC = () => {
-  const [userId, setUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'bills' | 'recurring'>('bills');
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [showAllPending, setShowAllPending] = useState(false);
+  const { currentDate } = useMonth();
+  const [activeTab, setActiveTab] = useState<'checklist' | 'recurring'>('checklist');
 
-  // Estados de Boletos / Contas a Pagar
+  // Estado das Contas a Pagar (Checklist)
   const [bills, setBills] = useState<BillToPay[]>([]);
   const [loadingBills, setLoadingBills] = useState(false);
+  const [showAllPending, setShowAllPending] = useState(false);
+  const [selectedMonthDate, setSelectedMonthDate] = useState<Date>(new Date(currentDate));
+
+  // Modais e formulários de Conta a Pagar
   const [billModalOpen, setBillModalOpen] = useState(false);
   const [editingBillId, setEditingBillId] = useState<string | null>(null);
   const [billTitle, setBillTitle] = useState('');
   const [billAmount, setBillAmount] = useState('');
-  const [billDate, setBillDate] = useState('');
-  const [billPix, setBillPix] = useState('');
+  const [billDueDate, setBillDueDate] = useState('');
+  const [billBarcode, setBillBarcode] = useState('');
+  const [savingBill, setSavingBill] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Estados de Contas Recorrentes
-  const [recurring, setRecurring] = useState<RecurringBill[]>([]);
+  // Estado das Assinaturas Recorrentes
+  const [recurringBills, setRecurringBills] = useState<RecurringBill[]>([]);
+  const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [loadingRecurring, setLoadingRecurring] = useState(false);
+
+  // Modais e formulários de Recorrentes
   const [recModalOpen, setRecModalOpen] = useState(false);
   const [editingRecId, setEditingRecId] = useState<string | null>(null);
   const [recDesc, setRecDesc] = useState('');
   const [recAmount, setRecAmount] = useState('');
   const [recDueDay, setRecDueDay] = useState('10');
   const [recType, setRecType] = useState<'expense' | 'income'>('expense');
+  const [recCatId, setRecCatId] = useState<string | null>(null);
+  const [savingRec, setSavingRec] = useState(false);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setUserId(user.id);
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    if (userId) {
-      fetchBills(userId);
-      fetchRecurring();
-    }
-  }, [userId]);
-
-  const changeMonth = (delta: number) => {
-    const next = new Date(selectedDate);
-    next.setMonth(next.getMonth() + delta);
-    setSelectedDate(next);
-  };
+  const formatCurrency = (val: number) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
   const formatMonthTitle = (date: Date) => {
     const months = [
       'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
       'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
     ];
-    return `${months[date.getMonth()]} de ${date.getFullYear()}`;
+    return `${months[date.getMonth()]} ${date.getFullYear()}`;
   };
 
-  // --- CARREGAMENTO ---
-  const fetchBills = async (uid: string = userId || '') => {
-    if (!uid) return;
+  const changeMonth = (delta: number) => {
+    const next = new Date(selectedMonthDate);
+    next.setMonth(next.getMonth() + delta);
+    setSelectedMonthDate(next);
+  };
+
+  // 1. Carregar Contas a Pagar
+  const fetchBills = useCallback(async () => {
     setLoadingBills(true);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       const { data, error } = await supabase
         .from('bills_to_pay')
         .select('*')
-        .eq('user_id', uid)
+        .eq('user_id', user.id)
         .order('is_paid', { ascending: true })
         .order('due_date', { ascending: true });
 
       if (error) throw error;
       setBills(data || []);
     } catch (err: any) {
-      console.warn('Erro ao carregar contas:', err.message);
+      console.warn('Erro ao carregar contas a pagar:', err.message);
     } finally {
       setLoadingBills(false);
     }
-  };
+  }, []);
 
-  const fetchRecurring = async () => {
+  // 2. Carregar Assinaturas Recorrentes e Categorias
+  const fetchRecurring = useCallback(async () => {
     setLoadingRecurring(true);
     try {
-      const { data, error } = await supabase
-        .from('recurring_bills')
-        .select('id, description, amount, due_day, category_id, is_active, type, categories(name)')
-        .order('due_day', { ascending: true });
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-      if (error) throw error;
-      setRecurring((data as unknown as RecurringBill[]) || []);
+      const [billsRes, catRes] = await Promise.all([
+        supabase
+          .from('recurring_bills')
+          .select('id, description, amount, due_day, category_id, is_active, type, categories(name)')
+          .eq('user_id', user.id)
+          .order('due_day', { ascending: true }),
+        supabase.from('categories').select('id, name, type').order('name'),
+      ]);
+
+      if (billsRes.error) throw billsRes.error;
+      setRecurringBills((billsRes.data as unknown as RecurringBill[]) || []);
+      setCategories(catRes.data || []);
     } catch (err: any) {
       console.warn('Erro ao carregar assinaturas:', err.message);
     } finally {
       setLoadingRecurring(false);
     }
-  };
+  }, []);
 
-  // --- AÇÕES DE CONTAS A PAGAR ---
+  useEffect(() => {
+    void fetchBills();
+    void fetchRecurring();
+  }, [fetchBills, fetchRecurring]);
+
+  // Alternar estado de pagamento do boleto e registar no extrato
   const toggleBillStatus = async (item: BillToPay) => {
     const nextStatus = !item.is_paid;
     setBills((prev) =>
@@ -145,51 +160,57 @@ export const Bills: React.FC = () => {
 
       if (error) throw error;
 
-      if (nextStatus && userId) {
-        const confirmar = window.confirm(
-          `Deseja lançar a despesa de R$ ${Number(item.amount).toFixed(2)} no extrato do mês de vencimento?`
+      if (nextStatus) {
+        const dFormat = item.due_date ? item.due_date.split('-').reverse().join('/') : '';
+        const confirmInsert = window.confirm(
+          `Pretende registar "- ${formatCurrency(item.amount)}" no extrato do mês de vencimento (${dFormat})?`
         );
-        if (confirmar) {
+
+        if (confirmInsert) {
+          const { data: { user } } = await supabase.auth.getUser();
+          const targetDate = item.due_date || new Date().toISOString().split('T')[0];
+
           await supabase.from('transactions').insert([
             {
-              user_id: userId,
+              user_id: user?.id,
               description: item.title,
               amount: item.amount,
               type: 'expense',
-              date: item.due_date || new Date().toISOString().split('T')[0],
+              date: targetDate,
               is_settled: true,
               budget_bucket: 'needs',
             },
           ]);
         }
       }
-      fetchBills();
+      void fetchBills();
     } catch (err: any) {
-      alert('Erro ao atualizar estado da conta: ' + err.message);
-      fetchBills();
+      alert(`Falha ao atualizar conta: ${err.message}`);
+      void fetchBills();
     }
   };
 
   const handleSaveBill = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userId) return;
-
     const parsedAmount = parseFloat(billAmount.replace(',', '.'));
     if (!billTitle.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
-      alert('Informe um título e valor válidos.');
+      alert('Informe um título e um montante válidos.');
       return;
     }
-    if (!billDate) {
+
+    if (!billDueDate) {
       alert('Informe a data de vencimento.');
       return;
     }
 
+    setSavingBill(true);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
       const payload = {
         title: billTitle.trim(),
         amount: parsedAmount,
-        due_date: billDate,
-        barcode_or_pix: billPix.trim() || null,
+        due_date: billDueDate,
+        barcode_or_pix: billBarcode.trim() || null,
       };
 
       if (editingBillId) {
@@ -201,7 +222,7 @@ export const Bills: React.FC = () => {
       } else {
         const { error } = await supabase.from('bills_to_pay').insert([
           {
-            user_id: userId,
+            user_id: user?.id,
             ...payload,
             is_paid: false,
           },
@@ -213,61 +234,94 @@ export const Bills: React.FC = () => {
       setEditingBillId(null);
       setBillTitle('');
       setBillAmount('');
-      setBillDate('');
-      setBillPix('');
-      fetchBills();
+      setBillDueDate('');
+      setBillBarcode('');
+      void fetchBills();
     } catch (err: any) {
-      alert('Erro ao gravar conta: ' + err.message);
+      alert(`Erro ao guardar conta: ${err.message}`);
+    } finally {
+      setSavingBill(false);
     }
   };
 
-  const handleDeleteBill = async (id: string, title: string) => {
-    if (!window.confirm(`Remover "${title}" das contas a pagar?`)) return;
+  const handleDeleteBill = async (item: BillToPay) => {
+    if (!window.confirm(`Deseja remover "${item.title}"?`)) return;
+
     try {
-      await supabase.from('bills_to_pay').delete().eq('id', id);
-      fetchBills();
+      await supabase.from('bills_to_pay').delete().eq('id', item.id);
+      setBills((prev) => prev.filter((b) => b.id !== item.id));
     } catch (err: any) {
-      alert('Erro ao remover: ' + err.message);
+      alert(`Erro ao apagar: ${err.message}`);
     }
   };
 
-  // --- AÇÕES DE RECORRENTES ---
+  const handleCopyCode = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  // Alternar ativação de assinatura recorrente
+  const toggleRecurringActive = async (bill: RecurringBill) => {
+    const nextStatus = !bill.is_active;
+    try {
+      const { error } = await supabase
+        .from('recurring_bills')
+        .update({ is_active: nextStatus })
+        .eq('id', bill.id);
+
+      if (error) throw error;
+
+      await supabase
+        .from('transactions')
+        .update({ repeats_monthly: nextStatus })
+        .ilike('description', bill.description.trim());
+
+      setRecurringBills((prev) =>
+        prev.map((b) => (b.id === bill.id ? { ...b, is_active: nextStatus } : b))
+      );
+    } catch (err: any) {
+      alert(`Erro ao alternar assinatura: ${err.message}`);
+    }
+  };
+
   const handleSaveRecurring = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userId) return;
-
     const parsedAmount = parseFloat(recAmount.replace(',', '.'));
     const parsedDay = parseInt(recDueDay, 10);
 
     if (!recDesc.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
-      alert('Informe uma descrição e valor válidos.');
-      return;
-    }
-    if (isNaN(parsedDay) || parsedDay < 1 || parsedDay > 31) {
-      alert('O dia deve ser entre 1 e 31.');
+      alert('Informe uma descrição e um montante válidos.');
       return;
     }
 
+    if (isNaN(parsedDay) || parsedDay < 1 || parsedDay > 31) {
+      alert('O dia de vencimento deve situar-se entre 1 e 31.');
+      return;
+    }
+
+    setSavingRec(true);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const payload = {
+        description: recDesc.trim(),
+        amount: parsedAmount,
+        due_day: parsedDay,
+        category_id: recCatId,
+        type: recType,
+      };
+
       if (editingRecId) {
         const { error } = await supabase
           .from('recurring_bills')
-          .update({
-            description: recDesc.trim(),
-            amount: parsedAmount,
-            due_day: parsedDay,
-            type: recType,
-          })
+          .update(payload)
           .eq('id', editingRecId);
         if (error) throw error;
       } else {
         const { error } = await supabase.from('recurring_bills').insert([
           {
-            user_id: userId,
-            description: recDesc.trim(),
-            amount: parsedAmount,
-            due_day: parsedDay,
-            type: recType,
+            user_id: user?.id,
+            ...payload,
             is_active: true,
           },
         ]);
@@ -279,39 +333,81 @@ export const Bills: React.FC = () => {
       setRecDesc('');
       setRecAmount('');
       setRecDueDay('10');
-      fetchRecurring();
+      setRecCatId(null);
+      void fetchRecurring();
     } catch (err: any) {
-      alert('Erro ao gravar assinatura: ' + err.message);
-    }
-  };
-
-  const toggleRecurringActive = async (bill: RecurringBill) => {
-    const nextStatus = !bill.is_active;
-    try {
-      const { error } = await supabase
-        .from('recurring_bills')
-        .update({ is_active: nextStatus })
-        .eq('id', bill.id);
-      if (error) throw error;
-      fetchRecurring();
-    } catch (err: any) {
-      alert('Erro ao atualizar: ' + err.message);
+      alert(`Erro ao guardar assinatura: ${err.message}`);
+    } finally {
+      setSavingRec(false);
     }
   };
 
   const handleDeleteRecurring = async (id: string, desc: string) => {
     if (!window.confirm(`Deseja remover a assinatura "${desc}"?`)) return;
+
     try {
       await supabase.from('recurring_bills').delete().eq('id', id);
-      fetchRecurring();
+      setRecurringBills((prev) => prev.filter((b) => b.id !== id));
     } catch (err: any) {
-      alert('Erro ao excluir: ' + err.message);
+      alert(`Erro ao remover: ${err.message}`);
     }
   };
 
-  // --- FILTROS E CÁLCULOS ---
-  const targetYear = selectedDate.getFullYear();
-  const targetMonth = selectedDate.getMonth();
+  // Sincronizar contas recorrentes para o mês atual
+  const syncRecurringWithCurrentMonth = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const year = selectedMonthDate.getFullYear();
+      const month = selectedMonthDate.getMonth();
+      const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+      const lastDay = new Date(year, month + 1, 0).getDate();
+      const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+      const { data: currentTxs } = await supabase
+        .from('transactions')
+        .select('description')
+        .eq('user_id', user.id)
+        .gte('date', startDate)
+        .lte('date', endDate);
+
+      const existingNames = new Set((currentTxs || []).map((t) => t.description.toLowerCase().trim()));
+      const activeList = recurringBills.filter((r) => r.is_active);
+      const toInsert: any[] = [];
+
+      for (const bill of activeList) {
+        if (!existingNames.has(bill.description.toLowerCase().trim())) {
+          const validDay = Math.min(bill.due_day || 1, lastDay);
+          const targetDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(validDay).padStart(2, '0')}`;
+
+          toInsert.push({
+            user_id: user.id,
+            description: bill.description.trim(),
+            amount: bill.amount,
+            type: bill.type || 'expense',
+            category_id: bill.category_id || null,
+            date: targetDate,
+            is_settled: false,
+            repeats_monthly: true,
+          });
+        }
+      }
+
+      if (toInsert.length > 0) {
+        await supabase.from('transactions').insert(toInsert);
+        alert(`${toInsert.length} conta(s) recorrente(s) sincronizada(s) para ${formatMonthTitle(selectedMonthDate)}!`);
+      } else {
+        alert('Todas as contas recorrentes já se encontram no extrato deste mês.');
+      }
+    } catch (err: any) {
+      alert(`Erro na sincronização: ${err.message}`);
+    }
+  };
+
+  // Filtros de exibição
+  const targetYear = selectedMonthDate.getFullYear();
+  const targetMonth = selectedMonthDate.getMonth();
 
   const filteredBills = bills.filter((b) => {
     if (showAllPending) return !b.is_paid;
@@ -331,557 +427,688 @@ export const Bills: React.FC = () => {
     .filter((b) => b.is_paid)
     .reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
 
-  const handleShareWhatsApp = () => {
+  // Exportar para WhatsApp
+  const shareWhatsApp = () => {
     const labelHeader = showAllPending
       ? 'TODAS AS CONTAS PENDENTES'
-      : `CONTAS DE ${formatMonthTitle(selectedDate).toUpperCase()}`;
+      : `CONTAS DE ${formatMonthTitle(selectedMonthDate).toUpperCase()}`;
 
-    let text = `*LEMBRETE: CONTAS A PAGAR - ${labelHeader}*\n`;
-    text += `Pendente: R$ ${totalPending.toFixed(2).replace('.', ',')}\n`;
-    text += `Pago: R$ ${totalPaid.toFixed(2).replace('.', ',')}\n\n`;
+    let text = `📋 *LEMBRETE: CONTAS A PAGAR - ${labelHeader}*\n`;
+    text += `🔴 *Pendente:* R$ ${totalPending.toFixed(2).replace('.', ',')}\n`;
+    text += `🟢 *Pago:* R$ ${totalPaid.toFixed(2).replace('.', ',')}\n\n`;
+
+    if (filteredBills.length > 0) {
+      filteredBills.forEach((b) => {
+        const dFormat = b.due_date ? b.due_date.split('-').reverse().join('/') : '';
+        const icon = b.is_paid ? '✅' : '⏳';
+        text += `${icon} *${b.title}* - R$ ${Number(b.amount).toFixed(2).replace('.', ',')} (Venc: ${dFormat})\n`;
+        if (b.barcode_or_pix) text += `   └ Pix/Cód: ${b.barcode_or_pix}\n`;
+      });
+    } else {
+      text += `Nenhuma conta encontrada neste período.\n`;
+    }
+
+    const encoded = encodeURIComponent(text);
+    window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
+  };
+
+  // Exportar para Excel (.xls)
+  const exportExcel = () => {
+    if (filteredBills.length === 0) {
+      alert('Não existem contas filtradas para exportar.');
+      return;
+    }
+
+    let excelTable = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head><meta charset="utf-8"></head>
+      <body>
+        <table border="1">
+          <thead>
+            <tr style="background-color: #10B981; color: #ffffff; font-weight: bold;">
+              <th>Estado</th>
+              <th>Conta / Título</th>
+              <th>Valor (R$)</th>
+              <th>Vencimento</th>
+              <th>Pix / Código de Barras</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
 
     filteredBills.forEach((b) => {
-      const dFormat = b.due_date ? b.due_date.split('-').reverse().join('/') : '';
-      const icon = b.is_paid ? '[OK]' : '[PENDENTE]';
-      text += `${icon} *${b.title}* - R$ ${Number(b.amount).toFixed(2).replace('.', ',')} (Venc: ${dFormat})\n`;
-      if (b.barcode_or_pix) text += `   └ Chave/Cód: ${b.barcode_or_pix}\n`;
+      excelTable += `
+        <tr>
+          <td style="color: ${b.is_paid ? '#059669' : '#dc2626'}; font-weight: bold;">${b.is_paid ? 'PAGA' : 'PENDENTE'}</td>
+          <td>${b.title}</td>
+          <td>${Number(b.amount || 0).toFixed(2).replace('.', ',')}</td>
+          <td>${b.due_date ? b.due_date.split('-').reverse().join('/') : ''}</td>
+          <td>${b.barcode_or_pix || '—'}</td>
+        </tr>
+      `;
     });
 
-    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+    excelTable += `
+        <tr><td colspan="5"></td></tr>
+        <tr>
+          <td><strong>RESUMO</strong></td>
+          <td><strong>TOTAL PENDENTE</strong></td>
+          <td><strong>${totalPending.toFixed(2).replace('.', ',')}</strong></td>
+          <td colspan="2"></td>
+        </tr>
+        <tr>
+          <td><strong>RESUMO</strong></td>
+          <td><strong>TOTAL PAGO</strong></td>
+          <td><strong>${totalPaid.toFixed(2).replace('.', ',')}</strong></td>
+          <td colspan="2"></td>
+        </tr>
+      </tbody></table></body></html>
+    `;
+
+    const blob = new Blob([excelTable], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Contas_${formatMonthTitle(selectedMonthDate).replace(/\s+/g, '_').toLowerCase()}.xls`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-16">
-      {/* Cabeçalho */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-6">
+      {/* Cabeçalho Principal */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-black text-slate-100 tracking-tight">Boletos & Fixas</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Gestão de faturas, compromissos avulsos e assinaturas mensais
+          <h1 className="text-2xl font-black tracking-tight text-[#F8FAFC]">Boletos & Contas</h1>
+          <p className="mt-1 text-xs text-[#64748B]">
+            Gestão de prazos, checklist de pagamentos e assinaturas recorrentes
           </p>
         </div>
 
         {/* Alternador de Abas */}
-        <div className="flex bg-[#131927] border border-white/5 rounded-xl p-1 shrink-0">
+        <div className="flex items-center gap-1.5 p-1 bg-[#131927] border border-white/5 rounded-xl">
           <button
-            onClick={() => setActiveTab('bills')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition ${
-              activeTab === 'bills'
-                ? 'bg-emerald-500 text-slate-950 shadow'
-                : 'text-slate-400 hover:text-slate-200'
+            onClick={() => setActiveTab('checklist')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
+              activeTab === 'checklist'
+                ? 'bg-emerald-500 text-slate-950'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Calendar className="w-4 h-4" />
+            <ReceiptText size={14} />
             Contas a Pagar
           </button>
           <button
             onClick={() => setActiveTab('recurring')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
               activeTab === 'recurring'
-                ? 'bg-emerald-500 text-slate-950 shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-emerald-500 text-slate-950'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Repeat className="w-4 h-4" />
-            Assinaturas Fixas
+            <Repeat size={14} />
+            Assinaturas & Fixas
           </button>
         </div>
       </div>
 
-      {activeTab === 'bills' ? (
-        <>
-          {/* Navegador de Mês & Filtro Pendentes */}
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-[#131927] border border-white/5 rounded-2xl p-3">
+      {activeTab === 'checklist' ? (
+        /* ABA 1: CONTAS A PAGAR (CHECKLIST) */
+        <div className="space-y-5">
+          {/* Barra de Filtro e Mês */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-[#131927] border border-white/5 rounded-2xl">
             {!showAllPending ? (
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => changeMonth(-1)}
-                  className="p-1.5 rounded-lg bg-[#0B0F19] text-slate-400 hover:text-white border border-white/5"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft size={16} />
                 </button>
-                <span className="text-xs font-bold text-slate-200 px-2">
-                  {formatMonthTitle(selectedDate)}
+                <span className="text-xs font-bold text-slate-100 min-w-[140px] text-center">
+                  {formatMonthTitle(selectedMonthDate)}
                 </span>
                 <button
                   onClick={() => changeMonth(1)}
-                  className="p-1.5 rounded-lg bg-[#0B0F19] text-slate-400 hover:text-white border border-white/5"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight size={16} />
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2 text-amber-400 text-xs font-bold px-2">
-                <Clock className="w-4 h-4" />
-                Todas as Contas Pendentes
+              <div className="flex items-center gap-2 px-2 py-1 text-xs font-bold text-amber-400">
+                <Clock size={14} />
+                <span>Exibindo todas as contas pendentes</span>
               </div>
             )}
 
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowAllPending(!showAllPending)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
                   showAllPending
-                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                    : 'bg-[#0B0F19] border-white/5 text-slate-400 hover:text-slate-200'
+                    ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                    : 'bg-[#0B0F19] border-white/5 text-slate-400 hover:text-white'
                 }`}
               >
                 {showAllPending ? 'Ver por Mês' : 'Todas Pendentes'}
               </button>
+
               <button
-                onClick={handleShareWhatsApp}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#0B0F19] border border-white/5 text-slate-300 hover:text-white transition"
+                onClick={shareWhatsApp}
+                className="p-2 rounded-xl bg-[#25D366]/15 border border-[#25D366]/30 text-[#25D366] hover:bg-[#25D366]/25 transition"
+                title="Partilhar no WhatsApp"
               >
-                <Share2 className="w-3.5 h-3.5 text-emerald-400" />
-                WhatsApp
+                <Share2 size={14} />
               </button>
+
+              <button
+                onClick={exportExcel}
+                className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition"
+                title="Exportar Excel (.xls)"
+              >
+                <FileSpreadsheet size={14} />
+              </button>
+
               <button
                 onClick={() => {
                   setEditingBillId(null);
                   setBillTitle('');
                   setBillAmount('');
-                  setBillDate(new Date().toISOString().split('T')[0]);
-                  setBillPix('');
+                  const y = selectedMonthDate.getFullYear();
+                  const m = String(selectedMonthDate.getMonth() + 1).padStart(2, '0');
+                  setBillDueDate(`${y}-${m}-10`);
+                  setBillBarcode('');
                   setBillModalOpen(true);
                 }}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-500 text-slate-950 hover:bg-emerald-400 transition"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs hover:bg-emerald-400 transition"
               >
-                <Plus className="w-4 h-4" />
+                <Plus size={14} />
                 Nova Conta
               </button>
             </div>
           </div>
 
           {/* Cards de Resumo */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-[#131927] border border-white/5 rounded-2xl p-4 flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold tracking-wider uppercase text-slate-400">Total Pendente</p>
-                <p className="text-2xl font-black text-rose-400 mt-1">
-                  R$ {totalPending.toFixed(2).replace('.', ',')}
-                </p>
-              </div>
-              <div className="p-3 bg-rose-500/10 rounded-xl text-rose-400">
-                <Clock className="w-6 h-6" />
-              </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-4 rounded-2xl bg-[#131927] border border-white/5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Total Pendente
+              </span>
+              <span className="text-2xl font-black text-rose-400 mt-1 block">
+                {formatCurrency(totalPending)}
+              </span>
             </div>
 
-            <div className="bg-[#131927] border border-white/5 rounded-2xl p-4 flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold tracking-wider uppercase text-slate-400">Total Pago</p>
-                <p className="text-2xl font-black text-emerald-400 mt-1">
-                  R$ {totalPaid.toFixed(2).replace('.', ',')}
-                </p>
-              </div>
-              <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-400">
-                <Check className="w-6 h-6" />
-              </div>
+            <div className="p-4 rounded-2xl bg-[#131927] border border-white/5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Total Liquidado
+              </span>
+              <span className="text-2xl font-black text-emerald-400 mt-1 block">
+                {formatCurrency(totalPaid)}
+              </span>
             </div>
           </div>
 
           {/* Lista de Contas */}
-          {loadingBills ? (
-            <div className="py-16 text-center text-xs text-slate-500">A carregar contas a pagar...</div>
-          ) : filteredBills.length === 0 ? (
-            <div className="bg-[#131927] border border-white/5 rounded-2xl p-12 text-center text-slate-500">
-              <Check className="w-10 h-10 mx-auto mb-2 text-slate-600 stroke-1" />
-              <p className="text-sm font-bold text-slate-300">Nenhuma conta pendente</p>
-              <p className="text-xs text-slate-500 mt-1">
-                Todas as faturas deste período estão em dia ou não foram cadastradas.
-              </p>
+          <div className="rounded-2xl border border-white/5 bg-[#131927] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-[#F8FAFC]">Checklist de Faturas & Boletos</h2>
+              <span className="text-xs font-semibold text-[#64748B]">
+                {filteredBills.length} registo(s)
+              </span>
             </div>
-          ) : (
-            <div className="space-y-3">
-              {filteredBills.map((item) => {
-                const dFormat = item.due_date ? item.due_date.split('-').reverse().join('/') : '';
-                return (
+
+            {loadingBills ? (
+              <div className="flex items-center justify-center py-12 gap-2 text-xs text-slate-400">
+                <Loader2 size={16} className="animate-spin text-emerald-400" />
+                A carregar contas a pagar...
+              </div>
+            ) : filteredBills.length === 0 ? (
+              <div className="py-12 text-center text-xs text-[#64748B]">
+                {showAllPending
+                  ? 'Nenhuma conta pendente no momento!'
+                  : `Nenhuma conta encontrada em ${formatMonthTitle(selectedMonthDate)}.`}
+              </div>
+            ) : (
+              <div className="divide-y divide-white/5">
+                {filteredBills.map((b) => (
                   <div
-                    key={item.id}
-                    className={`bg-[#131927] border rounded-2xl p-4 transition ${
-                      item.is_paid ? 'border-white/5 opacity-60' : 'border-white/10'
+                    key={b.id}
+                    className={`py-3 flex flex-col gap-2 transition rounded-xl px-2 ${
+                      b.is_paid ? 'opacity-60 bg-white/[0.01]' : 'hover:bg-white/[0.02]'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center justify-between gap-3">
+                      {/* Checkbox e Título */}
                       <div className="flex items-center gap-3 min-w-0">
                         <button
-                          onClick={() => toggleBillStatus(item)}
-                          className={`w-6 h-6 rounded-lg border flex items-center justify-center transition shrink-0 ${
-                            item.is_paid
+                          onClick={() => toggleBillStatus(b)}
+                          className={`w-5 h-5 rounded-md flex items-center justify-center border transition shrink-0 ${
+                            b.is_paid
                               ? 'bg-emerald-500 border-emerald-500 text-slate-950'
-                              : 'bg-[#0B0F19] border-slate-700 hover:border-slate-500'
+                              : 'border-slate-600 bg-[#0B0F19] hover:border-emerald-500'
                           }`}
                         >
-                          {item.is_paid && <Check className="w-4 h-4 stroke-[3]" />}
+                          {b.is_paid && <Check size={12} strokeWidth={3} />}
                         </button>
 
                         <div className="min-w-0">
-                          <h4
-                            className={`text-sm font-bold truncate ${
-                              item.is_paid ? 'text-slate-400 line-through' : 'text-slate-100'
+                          <p
+                            className={`text-xs font-bold truncate ${
+                              b.is_paid ? 'line-through text-slate-400' : 'text-slate-100'
                             }`}
                           >
-                            {item.title}
-                          </h4>
-                          <p className="text-xs text-slate-400 mt-0.5">Vencimento: {dFormat}</p>
+                            {b.title}
+                          </p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            Vencimento: {b.due_date ? b.due_date.split('-').reverse().join('/') : '—'}
+                          </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4 shrink-0">
+                      {/* Montante e Ações */}
+                      <div className="flex items-center gap-3 shrink-0">
                         <span
-                          className={`text-base font-extrabold ${
-                            item.is_paid ? 'text-emerald-400' : 'text-slate-100'
+                          className={`text-xs font-black ${
+                            b.is_paid ? 'text-emerald-400' : 'text-slate-100'
                           }`}
                         >
-                          R$ {Number(item.amount).toFixed(2).replace('.', ',')}
+                          {formatCurrency(b.amount)}
                         </span>
 
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => {
-                              setEditingBillId(item.id);
-                              setBillTitle(item.title);
-                              setBillAmount(String(item.amount));
-                              setBillDate(item.due_date);
-                              setBillPix(item.barcode_or_pix || '');
+                              setEditingBillId(b.id);
+                              setBillTitle(b.title);
+                              setBillAmount(String(b.amount));
+                              setBillDueDate(b.due_date);
+                              setBillBarcode(b.barcode_or_pix || '');
                               setBillModalOpen(true);
                             }}
-                            className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+                            className="p-1.5 text-slate-400 hover:text-sky-400 transition"
+                            title="Editar conta"
                           >
-                            <Edit2 className="w-4 h-4" />
+                            <Edit2 size={13} />
                           </button>
                           <button
-                            onClick={() => handleDeleteBill(item.id, item.title)}
-                            className="p-2 text-rose-400 hover:text-rose-300 rounded-lg hover:bg-rose-500/10 transition"
+                            onClick={() => handleDeleteBill(b)}
+                            className="p-1.5 text-slate-400 hover:text-rose-400 transition"
+                            title="Remover conta"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 size={13} />
                           </button>
                         </div>
                       </div>
                     </div>
 
-                    {/* Linha Digitável / Pix */}
-                    {item.barcode_or_pix && (
-                      <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between gap-3 bg-[#0B0F19]/60 px-3 py-2 rounded-xl">
-                        <span className="text-[11px] text-slate-400 font-mono truncate">
-                          {item.barcode_or_pix}
-                        </span>
+                    {/* Linha do Código Pix / Código de Barras */}
+                    {b.barcode_or_pix && (
+                      <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-[#0B0F19] border border-white/5 text-[10px] text-slate-400 ml-8">
+                        <span className="truncate font-mono">{b.barcode_or_pix}</span>
                         <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(item.barcode_or_pix || '');
-                            alert('Código/Chave copiado!');
-                          }}
-                          className="flex items-center gap-1 text-[11px] font-bold text-sky-400 hover:text-sky-300 shrink-0"
+                          onClick={() => handleCopyCode(b.id, b.barcode_or_pix!)}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#131927] border border-white/5 text-sky-400 hover:text-sky-300 transition shrink-0 font-semibold"
                         >
-                          <Copy className="w-3.5 h-3.5" />
-                          Copiar
+                          {copiedId === b.id ? (
+                            <>
+                              <CheckCircle2 size={10} className="text-emerald-400" /> Copiado!
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={10} /> Copiar
+                            </>
+                          )}
                         </button>
                       </div>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       ) : (
-        /* ABA DE ASSINATURAS FIXAS / RECORRENTES */
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
+        /* ABA 2: ASSINATURAS & RECORRENTES */
+        <div className="space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-[#131927] border border-white/5 rounded-2xl">
             <div>
-              <h2 className="text-base font-bold text-slate-100">Contas Recorrentes Mensais</h2>
-              <p className="text-xs text-slate-400">
-                Entradas e saídas automáticas configuradas para todos os meses
+              <p className="text-xs font-bold text-slate-200">Lançamentos Automáticos Mensais</p>
+              <p className="text-[11px] text-slate-400">
+                Gera pendências fixas no extrato de todos os meses automaticamente
               </p>
             </div>
-            <button
-              onClick={() => {
-                setEditingRecId(null);
-                setRecDesc('');
-                setRecAmount('');
-                setRecDueDay('10');
-                setRecType('expense');
-                setRecModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-500 text-slate-950 hover:bg-emerald-400 transition"
-            >
-              <Plus className="w-4 h-4" />
-              Nova Assinatura
-            </button>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={syncRecurringWithCurrentMonth}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 hover:bg-sky-500/25 text-xs font-bold transition"
+              >
+                <Zap size={14} />
+                Sincronizar Mês
+              </button>
+
+              <button
+                onClick={() => {
+                  setEditingRecId(null);
+                  setRecDesc('');
+                  setRecAmount('');
+                  setRecDueDay('10');
+                  setRecCatId(null);
+                  setRecType('expense');
+                  setRecModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs hover:bg-emerald-400 transition"
+              >
+                <Plus size={14} />
+                Nova Assinatura
+              </button>
+            </div>
           </div>
 
-          {loadingRecurring ? (
-            <div className="py-16 text-center text-xs text-slate-500">A carregar assinaturas...</div>
-          ) : recurring.length === 0 ? (
-            <div className="bg-[#131927] border border-white/5 rounded-2xl p-12 text-center text-slate-500">
-              <Repeat className="w-10 h-10 mx-auto mb-2 text-slate-600 stroke-1" />
-              <p className="text-sm font-bold text-slate-300">Nenhuma assinatura fixa</p>
-              <p className="text-xs text-slate-500 mt-1">
-                Adicione aluguer, internet ou planos mensais para alimentar o orçamento.
-              </p>
+          <div className="rounded-2xl border border-white/5 bg-[#131927] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-[#F8FAFC]">Contas Fixas Cadastradas</h2>
+              <span className="text-xs font-semibold text-[#64748B]">
+                {recurringBills.length} registo(s)
+              </span>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {recurring.map((item) => (
-                <div
-                  key={item.id}
-                  className={`bg-[#131927] border rounded-2xl p-4 flex flex-col justify-between transition ${
-                    item.is_active ? 'border-white/5' : 'border-white/5 opacity-50'
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <h4 className="text-sm font-bold text-slate-100 truncate">{item.description}</h4>
-                      <button
-                        onClick={() => toggleRecurringActive(item)}
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold transition ${
-                          item.is_active
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-slate-800 text-slate-400 border border-slate-700'
-                        }`}
-                      >
-                        {item.is_active ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
-                        {item.is_active ? 'Ativa' : 'Pausada'}
-                      </button>
+
+            {loadingRecurring ? (
+              <div className="flex items-center justify-center py-12 gap-2 text-xs text-slate-400">
+                <Loader2 size={16} className="animate-spin text-emerald-400" />
+                A carregar assinaturas...
+              </div>
+            ) : recurringBills.length === 0 ? (
+              <div className="py-12 text-center text-xs text-[#64748B]">
+                Nenhuma assinatura ou conta fixa cadastrada.
+              </div>
+            ) : (
+              <div className="divide-y divide-white/5">
+                {recurringBills.map((r) => (
+                  <div
+                    key={r.id}
+                    className={`py-3 flex items-center justify-between gap-4 px-2 rounded-xl transition ${
+                      !r.is_active ? 'opacity-50 bg-white/[0.01]' : 'hover:bg-white/[0.02]'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-100 truncate">{r.description}</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        Todo dia {r.due_day} • {r.categories?.name || 'Geral'}
+                      </p>
                     </div>
 
-                    <p className="text-xs text-slate-400">
-                      Todo dia {item.due_day} • {item.categories?.name || 'Geral'}
-                    </p>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span
+                        className={`text-xs font-black ${
+                          r.type === 'income' ? 'text-emerald-400' : 'text-slate-100'
+                        }`}
+                      >
+                        {r.type === 'income' ? '+' : '-'} {formatCurrency(r.amount)}
+                      </span>
 
-                    <p
-                      className={`text-xl font-extrabold mt-3 ${
-                        item.type === 'income' ? 'text-emerald-400' : 'text-slate-100'
+                      <button
+                        onClick={() => toggleRecurringActive(r)}
+                        className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition ${
+                          r.is_active
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-400 border border-white/5'
+                        }`}
+                      >
+                        {r.is_active ? 'Ativa' : 'Pausada'}
+                      </button>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            setEditingRecId(r.id);
+                            setRecDesc(r.description);
+                            setRecAmount(String(r.amount));
+                            setRecDueDay(String(r.due_day));
+                            setRecCatId(r.category_id);
+                            setRecType(r.type || 'expense');
+                            setRecModalOpen(true);
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-sky-400 transition"
+                          title="Editar"
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteRecurring(r.id, r.description)}
+                          className="p-1.5 text-slate-400 hover:text-rose-400 transition"
+                          title="Remover"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1: CRIAR / EDITAR CONTA A PAGAR */}
+      {billModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <form
+            onSubmit={handleSaveBill}
+            className="w-full max-w-md bg-[#0B0F19] border border-white/10 rounded-2xl p-5 shadow-2xl space-y-4"
+          >
+            <h3 className="text-base font-bold text-slate-100">
+              {editingBillId ? 'Editar Conta' : 'Nova Conta a Pagar'}
+            </h3>
+
+            <div>
+              <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                Descrição da Conta
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="Ex: Aluguel, Luz (Copel), Fatura Cartão"
+                value={billTitle}
+                onChange={(e) => setBillTitle(e.target.value)}
+                className="w-full bg-[#131927] border border-white/10 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                  Valor (R$)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0,00"
+                  value={billAmount}
+                  onChange={(e) => setBillAmount(e.target.value)}
+                  className="w-full bg-[#131927] border border-white/10 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                  Vencimento
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={billDueDate}
+                  onChange={(e) => setBillDueDate(e.target.value)}
+                  className="w-full bg-[#131927] border border-white/10 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                Código de Barras ou Chave Pix (Opcional)
+              </label>
+              <input
+                type="text"
+                placeholder="Cole a chave Pix ou linha digitável"
+                value={billBarcode}
+                onChange={(e) => setBillBarcode(e.target.value)}
+                className="w-full bg-[#131927] border border-white/10 rounded-xl p-2.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setBillModalOpen(false)}
+                disabled={savingBill}
+                className="flex-1 py-2.5 bg-[#131927] text-slate-300 font-bold text-xs rounded-xl hover:bg-slate-800 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={savingBill}
+                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5"
+              >
+                {savingBill && <Loader2 size={13} className="animate-spin" />}
+                {savingBill ? 'A gravar...' : 'Gravar Conta'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL 2: CRIAR / EDITAR ASSINATURA RECORRENTE */}
+      {recModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <form
+            onSubmit={handleSaveRecurring}
+            className="w-full max-w-md bg-[#0B0F19] border border-white/10 rounded-2xl p-5 shadow-2xl space-y-4"
+          >
+            <h3 className="text-base font-bold text-slate-100">
+              {editingRecId ? 'Editar Assinatura' : 'Nova Assinatura Fixa'}
+            </h3>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setRecType('expense')}
+                className={`py-2 rounded-xl text-xs font-bold border transition ${
+                  recType === 'expense'
+                    ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+                    : 'bg-[#131927] border-white/5 text-slate-400'
+                }`}
+              >
+                Despesa Fixa
+              </button>
+              <button
+                type="button"
+                onClick={() => setRecType('income')}
+                className={`py-2 rounded-xl text-xs font-bold border transition ${
+                  recType === 'income'
+                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                    : 'bg-[#131927] border-white/5 text-slate-400'
+                }`}
+              >
+                Receita Fixa
+              </button>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                Descrição
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="Ex: Aluguel, Ginásio, Internet, Salário"
+                value={recDesc}
+                onChange={(e) => setRecDesc(e.target.value)}
+                className="w-full bg-[#131927] border border-white/10 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                  Valor (R$)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0,00"
+                  value={recAmount}
+                  onChange={(e) => setRecAmount(e.target.value)}
+                  className="w-full bg-[#131927] border border-white/10 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                  Dia do Vencimento
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  required
+                  placeholder="10"
+                  value={recDueDay}
+                  onChange={(e) => setRecDueDay(e.target.value)}
+                  className="w-full bg-[#131927] border border-white/10 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                Categoria no Orçamento
+              </label>
+              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1 bg-[#131927] rounded-xl border border-white/5">
+                {categories
+                  .filter((c) => c.type === recType)
+                  .map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setRecCatId(c.id)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                        recCatId === c.id
+                          ? 'bg-emerald-500 text-slate-950 font-bold'
+                          : 'bg-[#0B0F19] text-slate-300 hover:bg-slate-800'
                       }`}
                     >
-                      {item.type === 'income' ? '+ ' : '- '}R$ {Number(item.amount).toFixed(2).replace('.', ',')}
-                    </p>
-                  </div>
-
-                  <div className="pt-3 mt-3 border-t border-white/5 flex items-center justify-end gap-2">
-                    <button
-                      onClick={() => {
-                        setEditingRecId(item.id);
-                        setRecDesc(item.description);
-                        setRecAmount(String(item.amount));
-                        setRecDueDay(String(item.due_day));
-                        setRecType(item.type || 'expense');
-                        setRecModalOpen(true);
-                      }}
-                      className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      {c.name}
                     </button>
-                    <button
-                      onClick={() => handleDeleteRecurring(item.id, item.description)}
-                      className="p-1.5 text-rose-400 hover:text-rose-300 rounded-lg hover:bg-rose-500/10"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* MODAL CONTA A PAGAR (BOLETO) */}
-      {billModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md bg-[#0B0F19] border border-white/10 rounded-2xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-slate-100">
-                {editingBillId ? 'Editar Conta a Pagar' : 'Nova Conta a Pagar'}
-              </h3>
-              <button
-                onClick={() => setBillModalOpen(false)}
-                className="text-slate-400 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
+                  ))}
+              </div>
             </div>
 
-            <form onSubmit={handleSaveBill} className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Descrição
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Aluguer, Luz (Copel), Fatura Cartão"
-                  value={billTitle}
-                  onChange={(e) => setBillTitle(e.target.value)}
-                  className="w-full bg-[#131927] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Valor (R$)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="0,00"
-                    value={billAmount}
-                    onChange={(e) => setBillAmount(e.target.value)}
-                    className="w-full bg-[#131927] border border-white/10 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-100 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Vencimento
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={billDate}
-                    onChange={(e) => setBillDate(e.target.value)}
-                    className="w-full bg-[#131927] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Chave Pix ou Código de Barras (Opcional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="Cole a chave Pix ou linha digitável"
-                  value={billPix}
-                  onChange={(e) => setBillPix(e.target.value)}
-                  className="w-full bg-[#131927] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setBillModalOpen(false)}
-                  className="flex-1 py-2.5 rounded-xl bg-[#131927] text-slate-400 hover:text-white border border-white/5 text-xs font-semibold"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 text-xs transition"
-                >
-                  Gravar Conta
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL ASSINATURA FIXA */}
-      {recModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md bg-[#0B0F19] border border-white/10 rounded-2xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-slate-100">
-                {editingRecId ? 'Editar Assinatura' : 'Nova Assinatura Fixa'}
-              </h3>
+            <div className="flex gap-2 pt-2">
               <button
+                type="button"
                 onClick={() => setRecModalOpen(false)}
-                className="text-slate-400 hover:text-white"
+                disabled={savingRec}
+                className="flex-1 py-2.5 bg-[#131927] text-slate-300 font-bold text-xs rounded-xl hover:bg-slate-800 transition"
               >
-                <X className="w-5 h-5" />
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={savingRec}
+                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5"
+              >
+                {savingRec && <Loader2 size={13} className="animate-spin" />}
+                {savingRec ? 'A gravar...' : 'Gravar Assinatura'}
               </button>
             </div>
-
-            <form onSubmit={handleSaveRecurring} className="space-y-4">
-              <div className="grid grid-cols-2 gap-2 bg-[#131927] p-1 rounded-xl border border-white/5">
-                <button
-                  type="button"
-                  onClick={() => setRecType('expense')}
-                  className={`py-2 rounded-lg text-xs font-bold transition ${
-                    recType === 'expense'
-                      ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                      : 'text-slate-400'
-                  }`}
-                >
-                  Despesa
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRecType('income')}
-                  className={`py-2 rounded-lg text-xs font-bold transition ${
-                    recType === 'income'
-                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                      : 'text-slate-400'
-                  }`}
-                >
-                  Receita
-                </button>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Descrição
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Aluguer, Spotify, Ginásio, Salário"
-                  value={recDesc}
-                  onChange={(e) => setRecDesc(e.target.value)}
-                  className="w-full bg-[#131927] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Valor Mensal (R$)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="0,00"
-                    value={recAmount}
-                    onChange={(e) => setRecAmount(e.target.value)}
-                    className="w-full bg-[#131927] border border-white/10 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-100 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Dia Vencimento
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="31"
-                    required
-                    value={recDueDay}
-                    onChange={(e) => setRecDueDay(e.target.value)}
-                    className="w-full bg-[#131927] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setRecModalOpen(false)}
-                  className="flex-1 py-2.5 rounded-xl bg-[#131927] text-slate-400 hover:text-white border border-white/5 text-xs font-semibold"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 text-xs transition"
-                >
-                  Gravar Assinatura
-                </button>
-              </div>
-            </form>
-          </div>
+          </form>
         </div>
       )}
     </div>

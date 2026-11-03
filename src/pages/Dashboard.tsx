@@ -21,6 +21,7 @@ import {
 import { useMonth } from '../context/MonthContext';
 import { supabase } from '../services/supabase';
 import { TransactionModal } from '../components/modals/TransactionModal';
+import { PurchaseDetailsModal } from '../components/modals/PurchaseDetailsModal';
 
 type TransactionType = 'income' | 'expense';
 
@@ -84,6 +85,9 @@ export const Dashboard: React.FC = () => {
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [txModalType, setTxModalType] = useState<TransactionType>('expense');
 
+  // Modal de Detalhes da Compra / Lançamento
+  const [selectedTx, setSelectedTx] = useState<DashboardTransaction | null>(null);
+
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
     setErrorMsg('');
@@ -133,25 +137,10 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     void fetchTransactions();
-
-    // Escuta em tempo real adições feitas pelo telemóvel ou scanner
-    const channel = supabase
-      .channel('dashboard-transactions-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'transactions' },
-        () => {
-          void fetchTransactions();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
   }, [fetchTransactions]);
 
-  const toggleSettled = async (id: string, currentStatus?: boolean) => {
+  const toggleSettled = async (id: string, currentStatus?: boolean, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     const newStatus = !currentStatus;
     setTransactions((prev) =>
       prev.map((t) => (t.id === id ? { ...t, is_settled: newStatus } : t))
@@ -159,7 +148,8 @@ export const Dashboard: React.FC = () => {
     await supabase.from('transactions').update({ is_settled: newStatus }).eq('id', id);
   };
 
-  const handleDeleteTransaction = async (id: string, desc: string) => {
+  const handleDeleteTransaction = async (id: string, desc: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!window.confirm(`Deseja remover "${desc}"?`)) return;
     setTransactions((prev) => prev.filter((t) => t.id !== id));
     await supabase.from('transactions').delete().eq('id', id);
@@ -260,7 +250,8 @@ export const Dashboard: React.FC = () => {
               return (
                 <div
                   key={transaction.id}
-                  className="flex items-center justify-between gap-4 py-3 hover:bg-[#1E293B]/20 px-2 rounded-xl transition"
+                  onClick={() => setSelectedTx(transaction)}
+                  className="flex items-center justify-between gap-4 py-3 hover:bg-[#1E293B]/30 px-2 rounded-xl transition cursor-pointer"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-lg bg-[#0B0F19] border border-white/5 flex items-center justify-center shrink-0">
@@ -291,7 +282,7 @@ export const Dashboard: React.FC = () => {
                         {isIncome ? '+' : '-'} {formatCurrency(transaction.amount)}
                       </p>
                       <button
-                        onClick={() => toggleSettled(transaction.id, transaction.is_settled)}
+                        onClick={(e) => toggleSettled(transaction.id, transaction.is_settled, e)}
                         className={`mt-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded flex items-center gap-1 ml-auto ${
                           transaction.is_settled
                             ? 'bg-[#10B981]/15 text-[#10B981]'
@@ -311,7 +302,7 @@ export const Dashboard: React.FC = () => {
                     </div>
 
                     <button
-                      onClick={() => handleDeleteTransaction(transaction.id, transaction.description)}
+                      onClick={(e) => handleDeleteTransaction(transaction.id, transaction.description, e)}
                       className="p-1 text-[#64748B] hover:text-[#F43F5E] transition"
                       title="Excluir lançamento"
                     >
@@ -325,6 +316,7 @@ export const Dashboard: React.FC = () => {
         )}
       </section>
 
+      {/* Modal de Criação Rápida */}
       <TransactionModal
         isOpen={isTxModalOpen}
         initialType={txModalType}
@@ -334,6 +326,25 @@ export const Dashboard: React.FC = () => {
           void fetchTransactions();
         }}
       />
+
+      {/* Modal de Detalhes da Compra / Lançamento */}
+      {selectedTx && (
+        <PurchaseDetailsModal
+          visible={Boolean(selectedTx)}
+          transactionId={selectedTx.id}
+          description={selectedTx.description}
+          date={selectedTx.date || ''}
+          amount={selectedTx.amount}
+          userMonthlyIncome={incomeTotal > 0 ? incomeTotal : undefined}
+          onClose={() => setSelectedTx(null)}
+          onUpdated={() => {
+            void fetchTransactions();
+          }}
+          onDeleted={() => {
+            void fetchTransactions();
+          }}
+        />
+      )}
     </div>
   );
 };

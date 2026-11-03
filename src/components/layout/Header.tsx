@@ -7,12 +7,16 @@ import { LoginModal } from '../modals/LoginModal';
 interface HeaderProps {
   onOpenAudit: () => void;
   onOpenSettings: () => void;
+  currentTab?: string;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenAudit, onOpenSettings }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenAudit, onOpenSettings, currentTab }) => {
   const { formattedMonth, nextMonth, prevMonth } = useMonth();
   const [user, setUser] = useState<any>(null);
   const [loginOpen, setLoginOpen] = useState(false);
+
+  // O seletor de mês só deve aparecer no dashboard ou nas contas (bills)
+  const showMonthSelector = currentTab === 'dashboard';
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -39,22 +43,24 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAudit, onOpenSettings }) =
     <>
       <header className="h-16 px-4 md:px-6 flex items-center justify-between border-b border-[#1E293B] bg-[#0B0F19]">
         <div className="flex items-center gap-2">
-          {/* Seletor de Mês */}
-          <div className="flex items-center bg-[#131927] border border-[#1E293B] rounded-xl px-2 py-1">
-            <button
-              onClick={prevMonth}
-              className="p-1 hover:text-[#10B981] text-[#94A3B8] transition-colors"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <span className="px-2 text-xs font-bold text-[#F8FAFC]">{formattedMonth}</span>
-            <button
-              onClick={nextMonth}
-              className="p-1 hover:text-[#10B981] text-[#94A3B8] transition-colors"
-            >
-              <ChevronRight size={16} />
-            </button>
-          </div>
+          {/* Seletor de Mês condicional */}
+          {showMonthSelector && (
+            <div className="flex items-center bg-[#131927] border border-[#1E293B] rounded-xl px-2 py-1">
+              <button
+                onClick={prevMonth}
+                className="p-1 hover:text-[#10B981] text-[#94A3B8] transition-colors"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span className="px-2 text-xs font-bold text-[#F8FAFC]">{formattedMonth}</span>
+              <button
+                onClick={nextMonth}
+                className="p-1 hover:text-[#10B981] text-[#94A3B8] transition-colors"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

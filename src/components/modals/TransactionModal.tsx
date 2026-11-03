@@ -384,7 +384,7 @@ const [, setAccounts] = useState<Account[]>([]);
             <label className="text-[10px] text-[#64748B] font-bold tracking-wider block mb-1.5 uppercase">
               Categoria
             </label>
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+            <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
               {filteredCategories.map((c) => {
                 const isSelected = selectedCategory === c.id;
                 return (

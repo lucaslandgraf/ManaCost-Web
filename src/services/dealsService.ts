@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { ProductMatch, FlyerDeal, WeeklyFlyer } from '../types/database';
 import { cleanSearchText, parseSearchTokens } from '../utils/searchEngine';
 
-const CATALOG_PAGE_SIZE = 50;
+export const CATALOG_PAGE_SIZE = 60;
 
 export async function fetchProductMatches(): Promise<ProductMatch[]> {
   const { data, error } = await supabase
@@ -32,41 +32,97 @@ export async function fetchProductMatches(): Promise<ProductMatch[]> {
   return (data as unknown as ProductMatch[]) || [];
 }
 
+// Busca a lista real de categorias registradas no banco
+export async function fetchAvailableCategories(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('flyer_deals')
+    .select('category')
+    .not('category', 'is', null);
+
+  if (error) return [];
+
+  const set = new Set<string>();
+  (data || []).forEach((row) => {
+    if (row.category && typeof row.category === 'string' && row.category.trim().length > 1) {
+      set.add(row.category.trim());
+    }
+  });
+
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+
+// Busca a data do último lote de ofertas sincronizado
+export async function fetchLastUpdateDate(): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from('flyer_deals')
+      .select('created_at')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (data && data.length > 0 && data[0].created_at) {
+      return data[0].created_at;
+    }
+  } catch (_) {}
+  return null;
+}
+
+export interface FetchFlyerDealsResult {
+  deals: FlyerDeal[];
+  totalCount: number;
+}
+
 export async function fetchFlyerDeals(
   offset = 0,
   search = '',
-  category = 'Todos',
-  store = 'Todas'
-): Promise<FlyerDeal[]> {
+  category = 'Todas as Categorias',
+  store = 'Todas as lojas'
+): Promise<FetchFlyerDealsResult> {
   let query = supabase
     .from('flyer_deals')
-    .select('id, store_name, product_name, deal_price, image_url, category')
+    .select('id, store_name, product_name, deal_price, image_url, category', { count: 'exact' })
     .order('deal_price', { ascending: true })
     .order('id', { ascending: true })
     .range(offset, offset + CATALOG_PAGE_SIZE - 1);
 
-  const tokenGroups = parseSearchTokens(search);
+  if (store !== 'Todas' && store !== 'Todas as lojas') {
+    let storeKeyword = store;
+    if (store.includes('Almeida')) storeKeyword = 'Almeida';
+    else if (store.includes('Muffato')) storeKeyword = 'Muffato';
+    else if (store.includes('Condor')) storeKeyword = 'Condor';
+    else if (store.includes('Angeloni')) storeKeyword = 'Angeloni';
+    else if (store.includes('Atacadão')) storeKeyword = 'Atacad';
+    else if (store.includes('Amigão')) storeKeyword = 'Amigão';
+    else if (store.includes('Carrefour')) storeKeyword = 'Carrefour';
+    else if (store.includes('Santarém')) storeKeyword = 'Santarém';
+    else if (store.includes('Viscardi')) storeKeyword = 'Viscardi';
 
-  if (category !== 'Todos') {
+    query = query.ilike('store_name', `%${storeKeyword}%`);
+  }
+
+  if (category && category !== 'Todas as Categorias' && category !== 'Todos') {
     query = query.eq('category', category);
   }
 
-  if (store !== 'Todas') {
-    query = query.ilike('store_name', `%${store}%`);
+  const tokenGroups = parseSearchTokens(search);
+  if (tokenGroups.length > 0) {
+    tokenGroups.forEach((options) => {
+      if (options.length === 1) {
+        query = query.ilike('product_name', `%${options[0]}%`);
+      } else {
+        const orWords = options.map((term) => `product_name.ilike.%${term}%`).join(',');
+        query = query.or(orWords);
+      }
+    });
   }
 
-  const { data, error } = await query;
+  const { data, count, error } = await query;
   if (error) throw error;
 
-  const deals = (data as FlyerDeal[]) || [];
-  if (tokenGroups.length === 0) {
-    return deals;
-  }
-
-  return deals.filter((deal) => {
-    const normalizedName = cleanSearchText(deal.product_name);
-    return tokenGroups.every((group) => group.some((token) => normalizedName.includes(token)));
-  });
+  return {
+    deals: (data as FlyerDeal[]) || [],
+    totalCount: count ?? (data?.length || 0),
+  };
 }
 
 export async function fetchWeeklyFlyers(): Promise<WeeklyFlyer[]> {

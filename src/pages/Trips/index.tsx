@@ -11,6 +11,7 @@ import {
   CheckSquare,
   ArrowLeft,
   Archive,
+  ArchiveRestore,
   Edit2,
   FileSpreadsheet,
   FileText,
@@ -137,14 +138,32 @@ export const Trips: React.FC = () => {
   const fetchEvents = async (uid: string) => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data: eventsData, error } = await supabase
         .from('budget_events')
         .select('*')
         .eq('user_id', uid)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setEvents(data || []);
+
+      // Agrega valores reais de cada evento sem depender de triggers
+      const { data: txs } = await supabase
+        .from('transactions')
+        .select('event_id, amount')
+        .eq('user_id', uid)
+        .not('event_id', 'is', null);
+
+      const spentMap: Record<string, number> = {};
+      (txs || []).forEach((t: any) => {
+        spentMap[t.event_id] = (spentMap[t.event_id] || 0) + Number(t.amount || 0);
+      });
+
+      const enrichedEvents = (eventsData || []).map((ev) => ({
+        ...ev,
+        total_spent: spentMap[ev.id] ?? ev.total_spent ?? 0,
+      }));
+
+      setEvents(enrichedEvents);
     } catch (err: any) {
       console.warn('Erro ao carregar viagens:', err.message);
     } finally {
@@ -175,7 +194,10 @@ export const Trips: React.FC = () => {
         .eq('event_id', eventId)
         .order('created_at', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.warn('Aviso ao consultar checklist:', error.message);
+        return;
+      }
 
       if (!data || data.length === 0) {
         const defaultInserts = DEFAULT_CHECKLIST.map((item) => ({
@@ -200,11 +222,46 @@ export const Trips: React.FC = () => {
     }
   };
 
-  const handleOpenEvent = (event: BudgetEvent) => {
+  // 1. Mudança imediata de ecrã com resolução segura de utilizador
+  const handleOpenEvent = async (event: BudgetEvent) => {
     setSelectedEvent(event);
-    if (userId) {
-      fetchTransactionsForEvent(event.id);
-      fetchChecklistForEvent(event.id, userId);
+
+    let currentUid = userId;
+    if (!currentUid) {
+      const { data: { user } } = await supabase.auth.getUser();
+      currentUid = user?.id || null;
+      if (currentUid) setUserId(currentUid);
+    }
+
+    fetchTransactionsForEvent(event.id);
+
+    if (currentUid) {
+      fetchChecklistForEvent(event.id, currentUid);
+    }
+  };
+
+  const toggleArchiveEvent = async (e: React.MouseEvent, event: BudgetEvent) => {
+    e.stopPropagation();
+    const nextArchived = !event.is_archived;
+    
+    // Atualização otimista
+    setEvents((prev) =>
+      prev.map((ev) => (ev.id === event.id ? { ...ev, is_archived: nextArchived } : ev))
+    );
+    if (selectedEvent?.id === event.id) {
+      setSelectedEvent((prev) => (prev ? { ...prev, is_archived: nextArchived } : null));
+    }
+
+    try {
+      const { error } = await supabase
+        .from('budget_events')
+        .update({ is_archived: nextArchived })
+        .eq('id', event.id);
+
+      if (error) throw error;
+    } catch (err: any) {
+      alert('Erro ao atualizar status da viagem: ' + err.message);
+      if (userId) fetchEvents(userId);
     }
   };
 
@@ -297,6 +354,29 @@ export const Trips: React.FC = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Gastos Viagem');
     XLSX.writeFile(wb, `Relatorio_${selectedEvent.title.replace(/\s+/g, '_')}.xlsx`);
+  };
+
+  const handleExportEventCSV = () => {
+    if (!selectedEvent || eventTransactions.length === 0) {
+      alert('Não existem lançamentos para exportar nesta viagem.');
+      return;
+    }
+
+    const headers = ['Data', 'Descricao', 'Valor (R$)'];
+    const rows = eventTransactions.map((t) => [
+      t.date || '',
+      `"${(t.description || '').replace(/"/g, '""')}"`,
+      Number(t.amount || 0).toFixed(2),
+    ]);
+
+    const csvContent = [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Relatorio_${selectedEvent.title.replace(/\s+/g, '_')}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleExportChecklistExcel = () => {
@@ -498,6 +578,7 @@ export const Trips: React.FC = () => {
             target_budget: parseFloat(grandTotal.toFixed(2)),
             currency: 'BRL',
             description: simulationSummary,
+            is_archived: false,
           },
         ])
         .select()
@@ -562,8 +643,11 @@ export const Trips: React.FC = () => {
     checklistItems.length > 0 ? (completedChecklistCount / checklistItems.length) * 100 : 0;
 
   const totalSpentCalculated = eventTransactions.reduce((acc, t) => acc + Number(t.amount || 0), 0);
+
+  // Filtros reais das listas
   const activeEvents = events.filter((ev) => !ev.is_archived);
-  const archivedEvents = events.filter((ev) => ev.is_archived);
+  const archivedEvents = events.filter((ev) => Boolean(ev.is_archived));
+  const displayedEvents = statusTab === 'active' ? activeEvents : archivedEvents;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-16">
@@ -729,13 +813,14 @@ export const Trips: React.FC = () => {
             </button>
           </div>
 
+          {/* Abas Em Andamento / Concluídos */}
           <div className="flex gap-2">
             <button
               onClick={() => setStatusTab('active')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
                 statusTab === 'active'
                   ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
-                  : 'bg-[#131927] border border-white/5 text-slate-400'
+                  : 'bg-[#131927] border border-white/5 text-slate-400 hover:text-white'
               }`}
             >
               <Navigation className="w-3.5 h-3.5" />
@@ -746,7 +831,7 @@ export const Trips: React.FC = () => {
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
                 statusTab === 'archived'
                   ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
-                  : 'bg-[#131927] border border-white/5 text-slate-400'
+                  : 'bg-[#131927] border border-white/5 text-slate-400 hover:text-white'
               }`}
             >
               <Archive className="w-3.5 h-3.5" />
@@ -756,38 +841,61 @@ export const Trips: React.FC = () => {
 
           {loading ? (
             <div className="py-16 text-center text-xs text-slate-500">A carregar viagens...</div>
-          ) : activeEvents.length === 0 ? (
+          ) : displayedEvents.length === 0 ? (
             <div className="bg-[#131927] border border-white/5 rounded-2xl p-12 text-center text-slate-500">
               <Plane className="w-10 h-10 mx-auto mb-2 text-slate-600 stroke-1" />
-              <p className="text-sm font-bold text-slate-300">Nenhuma viagem em andamento</p>
-              <p className="text-xs text-slate-500 mt-1">Clique em "+ Novo" para estimar e criar uma viagem.</p>
+              <p className="text-sm font-bold text-slate-300">
+                {statusTab === 'active'
+                  ? 'Nenhuma viagem em andamento'
+                  : 'Nenhuma viagem arquivada ou concluída'}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                {statusTab === 'active'
+                  ? 'Clique em "+ Novo" para estimar e criar uma viagem.'
+                  : 'Você pode concluir viagens tocando no ícone de arquivo em cada cartão.'}
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {activeEvents.map((ev) => (
+              {displayedEvents.map((ev) => (
                 <div
                   key={ev.id}
                   onClick={() => handleOpenEvent(ev)}
                   className="bg-[#131927] border border-white/5 hover:border-emerald-500/30 rounded-2xl p-4 space-y-4 cursor-pointer transition"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400">
+                    <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400 shrink-0">
                         <Navigation className="w-4 h-4" />
                       </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-slate-100">{ev.title}</h3>
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-bold text-slate-100 truncate">{ev.title}</h3>
                         <p className="text-[11px] text-slate-400">Moeda oficial: {ev.currency}</p>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <span className="px-2 py-0.5 rounded bg-[#0B0F19] text-[10px] font-bold text-emerald-400 border border-white/5">
                         {ev.currency}
                       </span>
+                      
+                      {/* Botão para Concluir / Reabrir Viagem */}
+                      <button
+                        onClick={(e) => toggleArchiveEvent(e, ev)}
+                        className={`p-1.5 rounded-lg transition ${
+                          ev.is_archived
+                            ? 'text-sky-400 hover:bg-sky-500/10'
+                            : 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10'
+                        }`}
+                        title={ev.is_archived ? 'Reabrir viagem para Em Andamento' : 'Marcar como concluída (Arquivar)'}
+                      >
+                        {ev.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
+                      </button>
+
                       <button
                         onClick={(e) => handleDeleteEvent(e, ev.id, ev.title)}
                         className="p-1.5 text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                        title="Excluir viagem"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -886,7 +994,7 @@ export const Trips: React.FC = () => {
                 Partilhar Texto
               </button>
               <button
-                onClick={handleExportEventExcel}
+                onClick={handleExportEventCSV}
                 className="py-2.5 bg-[#131927] border border-white/10 text-slate-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 hover:bg-[#1E293B] transition"
               >
                 <FileText className="w-3.5 h-3.5" />

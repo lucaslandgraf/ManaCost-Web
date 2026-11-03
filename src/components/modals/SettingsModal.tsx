@@ -32,6 +32,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Renda mensal
+  const [monthlyIncome, setMonthlyIncome] = useState('0');
+
   // Metas orçamentárias
   const [useFixed, setUseFixed] = useState(false);
   const [needsPct, setNeedsPct] = useState('50');
@@ -70,13 +73,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('rule_needs_pct, rule_wants_pct, rule_savings_pct, use_fixed_targets, fixed_needs_val, fixed_wants_val, fixed_savings_val')
+        .select('monthly_income, rule_needs_pct, rule_wants_pct, rule_savings_pct, use_fixed_targets, fixed_needs_val, fixed_wants_val, fixed_savings_val')
         .eq('id', uid)
         .single();
 
       if (error && error.code !== 'PGRST116') throw error;
 
       if (data) {
+        setMonthlyIncome(String(data.monthly_income ?? 0));
         setUseFixed(Boolean(data.use_fixed_targets));
         setNeedsPct(String(data.rule_needs_pct ?? 50));
         setWantsPct(String(data.rule_wants_pct ?? 30));
@@ -116,6 +120,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         .from('profiles')
         .upsert({
           id: userId,
+          monthly_income: Number(monthlyIncome) || 0,
           use_fixed_targets: useFixed,
           rule_needs_pct: Number(needsPct) || 0,
           rule_wants_pct: Number(wantsPct) || 0,
@@ -127,7 +132,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
       if (error) throw error;
 
-      setFeedbackMsg({ type: 'success', text: 'Metas orçamentárias atualizadas com sucesso!' });
+      setFeedbackMsg({ type: 'success', text: 'Parâmetros e metas atualizados com sucesso!' });
       if (onSaved) onSaved();
     } catch (err: any) {
       setFeedbackMsg({ type: 'error', text: err.message || 'Erro ao guardar configurações.' });
@@ -239,13 +244,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           ) : (
             <>
-              {/* Secção 1: Metas Orçamentárias */}
+              {/* Secção 1: Metas Orçamentárias & Renda */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Target size={14} className="text-emerald-400" />
                   <span className="text-[10px] font-bold tracking-wider uppercase text-slate-400">
-                    Metas & Tetos de Gastos
+                    Renda & Metas Orçamentárias
                   </span>
+                </div>
+
+                {/* Campo Renda Base */}
+                <div className="mb-4 bg-[#131927] border border-white/5 rounded-xl p-3.5 space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-300 block uppercase tracking-wider">
+                    Renda Base Mensal (R$)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={monthlyIncome}
+                    onChange={(e) => setMonthlyIncome(e.target.value)}
+                    placeholder="Ex: 3500.00"
+                    className="w-full bg-[#0B0F19] border border-white/10 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Utilizado no cálculo de equivalência de esforço em horas de trabalho nos detalhes de lançamentos.
+                  </p>
                 </div>
 
                 <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#131927] border border-white/5 mb-4">
@@ -360,7 +383,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="mt-4 w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2"
                 >
                   {saving && <Loader2 size={14} className="animate-spin" />}
-                  {saving ? 'A guardar...' : 'Guardar Metas Orçamentárias'}
+                  {saving ? 'A guardar...' : 'Guardar Parâmetros & Metas'}
                 </button>
               </div>
 

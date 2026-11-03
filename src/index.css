@@ -3,11 +3,68 @@
 @tailwind utilities;
 
 @layer base {
+  * {
+    /* Garante barra escura por padrão no Firefox para qualquer overflow */
+    scrollbar-width: thin;
+    scrollbar-color: #1E293B #0B0F19;
+  }
+
+  /* Garante barra escura nos navegadores Chromium (Chrome, Edge, Opera) */
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: #0B0F19;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #1E293B;
+    border-radius: 9999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: #334155;
+  }
+
   body {
     margin: 0;
     background-color: #0B0F19;
     color: #F8FAFC;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer utilities {
+  /* Scrollbar escura personalizada */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #0B0F19;
+    border-radius: 8px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #1E293B;
+    border-radius: 8px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #334155;
+  }
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #1E293B #0B0F19;
+  }
+
+  /* Oculta completamente a barra (mantém a rolagem funcional) */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }

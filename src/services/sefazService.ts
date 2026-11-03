@@ -2,7 +2,13 @@ import { SefazProduct } from '../types/database';
 
 const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
 
-function encodeGeohash(latitude: number, longitude: number, precision: number = 9): string {
+// Fallback neutro do município de Londrina caso o utilizador negue a permissão de GPS
+export const DEFAULT_COORDS = {
+  lat: -23.3103,
+  lng: -51.1628,
+};
+
+export function encodeGeohash(latitude: number, longitude: number, precision: number = 9): string {
   const BITS = [16, 8, 4, 2, 1];
   let isEven = true;
   let latMin = -90.0,
@@ -44,7 +50,7 @@ function encodeGeohash(latitude: number, longitude: number, precision: number = 
   return hash;
 }
 
-function decodeGeohash(geohash: string): { latitude: number; longitude: number } {
+export function decodeGeohash(geohash: string): { latitude: number; longitude: number } {
   let isEven = true;
   let latMin = -90.0,
     latMax = 90.0;
@@ -83,16 +89,56 @@ function decodeGeohash(geohash: string): { latitude: number; longitude: number }
   };
 }
 
+/**
+ * Obtém a localização GPS exata do utilizador.
+ * Prioriza dados reais de satélite/rede do dispositivo com alta precisão.
+ */
+export async function getUserCoordinates(): Promise<{ lat: number; lng: number }> {
+  return new Promise((resolve) => {
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          resolve({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          });
+        },
+        (err) => {
+          console.warn('Permissão de GPS negada ou indisponível:', err.message);
+          resolve(DEFAULT_COORDS);
+        },
+        {
+          enableHighAccuracy: true, // Força chip GPS e antenas de alta precisão
+          timeout: 10000,
+          maximumAge: 0,            // Sempre obtém a posição atual em tempo real
+        }
+      );
+    } else {
+      resolve(DEFAULT_COORDS);
+    }
+  });
+}
+
 export const searchSefazProducts = async (
   termToSearch: string,
   radius: number = 10,
-  lat: number = -23.3045,
-  lng: number = -51.1696
+  lat?: number,
+  lng?: number,
+  offset: number = 0 // <-- Adicionado aqui
 ): Promise<SefazProduct[]> => {
   const term = termToSearch.trim();
   if (!term) return [];
 
-  const localGeohash = encodeGeohash(lat, lng, 9);
+  let finalLat = lat;
+  let finalLng = lng;
+
+  if (finalLat === undefined || finalLng === undefined) {
+    const coords = await getUserCoordinates();
+    finalLat = coords.lat;
+    finalLng = coords.lng;
+  }
+
+  const localGeohash = encodeGeohash(finalLat, finalLng, 9);
   const termoBase = term.split(' ')[0];
 
   let catId = '';
@@ -112,7 +158,7 @@ export const searchSefazProducts = async (
   const prodParams = new URLSearchParams({
     local: localGeohash,
     termo: term,
-    offset: '0',
+    offset: String(offset), // <-- Passa o offset dinâmico
     raio: String(radius),
     data: '-1',
     ordem: '0',
