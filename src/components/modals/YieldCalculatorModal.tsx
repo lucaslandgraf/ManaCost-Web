@@ -5,11 +5,9 @@ import {
   Shield,
   Lock,
   AlertCircle,
-  Info,
   Loader2,
   Building2,
   Calendar,
-  Percent,
 } from 'lucide-react';
 
 interface InstitutionPreset {
