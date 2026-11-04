@@ -6,28 +6,33 @@ interface MonthContextData {
   formattedMonth: string;
   nextMonth: () => void;
   prevMonth: () => void;
+  setMonthYear: (year: number, monthIndex: number) => void;
 }
 
 const MonthContext = createContext<MonthContextData>({} as MonthContextData);
 
 export const MonthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 10, 1)); // Nov 2026
+  const [currentDate, setCurrentDate] = useState(new Date(2026, 10, 1)); // Nov 2026[cite: 29]
 
   const nextMonth = () => {
-    setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+    setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1)); //[cite: 29]
   };
 
   const prevMonth = () => {
-    setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+    setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1)); //[cite: 29]
+  };
+
+  const setMonthYear = (year: number, monthIndex: number) => {
+    setCurrentDate(new Date(year, monthIndex, 1));
   };
 
   const formattedMonth = currentDate
     .toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })
     .replace('.', '')
-    .replace(' de ', ' ');
+    .replace(' de ', ' '); //[cite: 29]
 
   const capitalizedMonth =
-    formattedMonth.charAt(0).toUpperCase() + formattedMonth.slice(1);
+    formattedMonth.charAt(0).toUpperCase() + formattedMonth.slice(1); //[cite: 29]
 
   return (
     <MonthContext.Provider
@@ -36,6 +41,7 @@ export const MonthProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         formattedMonth: capitalizedMonth,
         nextMonth,
         prevMonth,
+        setMonthYear,
       }}
     >
       {children}
@@ -43,4 +49,4 @@ export const MonthProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 };
 
-export const useMonth = () => useContext(MonthContext);
+export const useMonth = () => useContext(MonthContext); //[cite: 29]

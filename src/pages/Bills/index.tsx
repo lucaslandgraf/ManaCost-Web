@@ -35,6 +35,7 @@ export interface RecurringBill {
   due_day: number;
   type?: 'income' | 'expense';
   category_id: string | null;
+  goal_id?: string | null;
   is_active: boolean;
   categories?: { name: string } | null;
 }
@@ -353,7 +354,7 @@ export const Bills: React.FC = () => {
     }
   };
 
-  // Sincronizar contas recorrentes para o mês atual
+  // Sincronizar contas recorrentes para o mês atual com incremento automático em Metas
   const syncRecurringWithCurrentMonth = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -375,6 +376,7 @@ export const Bills: React.FC = () => {
       const existingNames = new Set((currentTxs || []).map((t) => t.description.toLowerCase().trim()));
       const activeList = recurringBills.filter((r) => r.is_active);
       const toInsert: any[] = [];
+      const goalsToUpdate: { goal_id: string; amount: number }[] = [];
 
       for (const bill of activeList) {
         if (!existingNames.has(bill.description.toLowerCase().trim())) {
@@ -391,11 +393,32 @@ export const Bills: React.FC = () => {
             is_settled: false,
             repeats_monthly: true,
           });
+
+          if (bill.goal_id) {
+            goalsToUpdate.push({ goal_id: bill.goal_id, amount: Number(bill.amount) });
+          }
         }
       }
 
       if (toInsert.length > 0) {
         await supabase.from('transactions').insert(toInsert);
+
+        // Incrementa automaticamente o current_amount da meta vinculada
+        for (const item of goalsToUpdate) {
+          const { data: gData } = await supabase
+            .from('financial_goals')
+            .select('current_amount')
+            .eq('id', item.goal_id)
+            .single();
+
+          if (gData) {
+            await supabase
+              .from('financial_goals')
+              .update({ current_amount: Number(gData.current_amount || 0) + item.amount })
+              .eq('id', item.goal_id);
+          }
+        }
+
         alert(`${toInsert.length} conta(s) recorrente(s) sincronizada(s) para ${formatMonthTitle(selectedMonthDate)}!`);
       } else {
         alert('Todas as contas recorrentes já se encontram no extrato deste mês.');

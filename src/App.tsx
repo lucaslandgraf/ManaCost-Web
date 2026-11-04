@@ -8,7 +8,8 @@ import type { NavTab } from './components/layout/Sidebar';
 import { BottomNav } from './components/layout/BottomNav';
 import { Header } from './components/layout/Header';
 import { BasketDrawer } from './components/basket/BasketDrawer';
-
+import { Goals } from './pages/Goals/index';
+import { Simulator } from './pages/Simulador/index';
 // Autenticação
 import { Login } from './pages/Auth/Login';
 
@@ -22,6 +23,7 @@ import { Dashboard } from './pages/Dashboard';
 import { DealsRadar } from './pages/DealsRadar/DealsRadar';
 import { Bills } from './pages/Bills/index';
 import { Trips } from './pages/Trips/index';
+
 
 function AppContent() {
   const { session, loading } = useAuth();
@@ -67,11 +69,13 @@ function AppContent() {
         />
 
         <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 max-w-7xl w-full mx-auto">
-          {activeTab === 'dashboard' && <Dashboard key={refreshKey} />}
-          {activeTab === 'deals' && <DealsRadar />}
-          {activeTab === 'bills' && <Bills />}
-          {activeTab === 'trips' && <Trips />}
-        </main>
+  {activeTab === 'dashboard' && <Dashboard key={refreshKey} />}
+  {activeTab === 'deals' && <DealsRadar />}
+  {activeTab === 'bills' && <Bills />}
+  {activeTab === 'trips' && <Trips />}
+  {activeTab === 'goals' && <Goals />}
+  {activeTab === 'simulator' && <Simulator />}
+</main>
       </div>
 
       <BottomNav
