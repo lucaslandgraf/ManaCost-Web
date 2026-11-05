@@ -343,18 +343,45 @@ export const Bills: React.FC = () => {
     }
   };
 
+  // 1. Ao remover uma assinatura/conta fixa, limpa o molde e as pendências geradas no extrato
   const handleDeleteRecurring = async (id: string, desc: string) => {
-    if (!window.confirm(`Deseja remover a assinatura "${desc}"?`)) return;
+    if (
+      !window.confirm(
+        `Deseja remover a assinatura "${desc}" e limpar os lançamentos pendentes gerados no extrato?`
+      )
+    ) {
+      return;
+    }
 
     try {
-      await supabase.from('recurring_bills').delete().eq('id', id);
+      const { data: { user } } = await supabase.auth.getUser();
+
+      // 1. Apaga da tabela de moldes fixos
+      const { error: billError } = await supabase
+        .from('recurring_bills')
+        .delete()
+        .eq('id', id);
+
+      if (billError) throw billError;
+
+      // 2. Apaga do extrato as transações geradas por esta assinatura que ainda estão pendentes
+      if (user) {
+        await supabase
+          .from('transactions')
+          .delete()
+          .eq('user_id', user.id)
+          .ilike('description', desc.trim())
+          .eq('is_settled', false);
+      }
+
       setRecurringBills((prev) => prev.filter((b) => b.id !== id));
+      alert(`Assinatura "${desc}" e os lançamentos pendentes foram removidos com sucesso!`);
     } catch (err: any) {
       alert(`Erro ao remover: ${err.message}`);
     }
   };
 
-  // Sincronizar contas recorrentes para o mês atual com incremento automático em Metas
+  // 2. Sincronizar contas recorrentes com trava anti-duplicação de aportes
   const syncRecurringWithCurrentMonth = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -366,20 +393,47 @@ export const Bills: React.FC = () => {
       const lastDay = new Date(year, month + 1, 0).getDate();
       const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-      const { data: currentTxs } = await supabase
+      // Busca tudo o que já existe no extrato do mês
+      const { data: currentTxs, error: txError } = await supabase
         .from('transactions')
         .select('description')
         .eq('user_id', user.id)
         .gte('date', startDate)
         .lte('date', endDate);
 
-      const existingNames = new Set((currentTxs || []).map((t) => t.description.toLowerCase().trim()));
-      const activeList = recurringBills.filter((r) => r.is_active);
+      if (txError) throw txError;
+
+      const existingNames = (currentTxs || []).map((t) =>
+        (t.description || '').toLowerCase().trim()
+      );
+
+      // Garante uma única regra por descrição caso o banco tenha moldes repetidos
+      const activeList = recurringBills
+        .filter((r) => r.is_active)
+        .filter(
+          (bill, index, self) =>
+            index ===
+            self.findIndex(
+              (b) =>
+                b.description?.trim().toLowerCase() ===
+                bill.description?.trim().toLowerCase()
+            )
+        );
+
       const toInsert: any[] = [];
       const goalsToUpdate: { goal_id: string; amount: number }[] = [];
 
       for (const bill of activeList) {
-        if (!existingNames.has(bill.description.toLowerCase().trim())) {
+        const cleanDesc = bill.description.trim().toLowerCase();
+        const normalizedBill = cleanDesc.replace(/^aporte:\s*/i, '').trim();
+
+        // Checagem inteligente: confere o nome exato ou sem o prefixo "Aporte:"
+        const alreadyExists = existingNames.some((existing) => {
+          const normalizedExisting = existing.replace(/^aporte:\s*/i, '').trim();
+          return existing === cleanDesc || normalizedExisting === normalizedBill;
+        });
+
+        if (!alreadyExists) {
           const validDay = Math.min(bill.due_day || 1, lastDay);
           const targetDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(validDay).padStart(2, '0')}`;
 
@@ -397,13 +451,16 @@ export const Bills: React.FC = () => {
           if (bill.goal_id) {
             goalsToUpdate.push({ goal_id: bill.goal_id, amount: Number(bill.amount) });
           }
+
+          // Registra no array local para não duplicar na mesma rodada
+          existingNames.push(cleanDesc);
         }
       }
 
       if (toInsert.length > 0) {
-        await supabase.from('transactions').insert(toInsert);
+        const { error: insError } = await supabase.from('transactions').insert(toInsert);
+        if (insError) throw insError;
 
-        // Incrementa automaticamente o current_amount da meta vinculada
         for (const item of goalsToUpdate) {
           const { data: gData } = await supabase
             .from('financial_goals')
@@ -419,9 +476,11 @@ export const Bills: React.FC = () => {
           }
         }
 
-        alert(`${toInsert.length} conta(s) recorrente(s) sincronizada(s) para ${formatMonthTitle(selectedMonthDate)}!`);
+        alert(
+          `${toInsert.length} lançamento(s) sincronizado(s) para ${formatMonthTitle(selectedMonthDate)}!`
+        );
       } else {
-        alert('Todas as contas recorrentes já se encontram no extrato deste mês.');
+        alert('Todas as contas e aportes já se encontram lançados no extrato deste mês.');
       }
     } catch (err: any) {
       alert(`Erro na sincronização: ${err.message}`);
