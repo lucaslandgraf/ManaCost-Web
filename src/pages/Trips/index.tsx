@@ -146,15 +146,14 @@ export const Trips: React.FC = () => {
 
       if (error) throw error;
 
-      // Agrega valores reais de cada evento sem depender de triggers
-      const { data: txs } = await supabase
-        .from('transactions')
+      // Agrega valores reais de cada evento buscando em event_expenses
+      const { data: expData } = await supabase
+        .from('event_expenses')
         .select('event_id, amount')
-        .eq('user_id', uid)
-        .not('event_id', 'is', null);
+        .eq('user_id', uid);
 
       const spentMap: Record<string, number> = {};
-      (txs || []).forEach((t: any) => {
+      (expData || []).forEach((t: any) => {
         spentMap[t.event_id] = (spentMap[t.event_id] || 0) + Number(t.amount || 0);
       });
 
@@ -173,14 +172,26 @@ export const Trips: React.FC = () => {
 
   const fetchTransactionsForEvent = async (eventId: string) => {
     try {
+      // Busca diretamente na tabela event_expenses (igual ao mobile)
       const { data, error } = await supabase
-        .from('transactions')
+        .from('event_expenses')
         .select('*')
         .eq('event_id', eventId)
-        .order('date', { ascending: false });
+        .order('expense_date', { ascending: false });
 
       if (error) throw error;
-      setEventTransactions(data || []);
+
+      // Mapeia para manter compatibilidade com o estado da tela
+      const mapped: EventTransaction[] = (data || []).map((ex: any) => ({
+        id: ex.id,
+        event_id: ex.event_id,
+        description: ex.description,
+        amount: Number(ex.amount),
+        date: ex.expense_date,
+        category: ex.category || 'Geral',
+      }));
+
+      setEventTransactions(mapped);
     } catch (err: any) {
       console.warn('Erro ao carregar lançamentos:', err.message);
     }
@@ -265,14 +276,15 @@ export const Trips: React.FC = () => {
     }
   };
 
-  const handleDeleteEvent = async (e: React.MouseEvent, id: string, title: string) => {
+ const handleDeleteEvent = async (e: React.MouseEvent, id: string, title: string) => {
     e.stopPropagation();
     if (!window.confirm(`Deseja excluir permanentemente "${title}" e seus lançamentos?`)) return;
 
     try {
       await supabase.from('event_checklists').delete().eq('event_id', id);
-      await supabase.from('transactions').update({ event_id: null }).eq('event_id', id);
+      await supabase.from('event_expenses').delete().eq('event_id', id);
       await supabase.from('budget_events').delete().eq('id', id);
+
       setEvents((prev) => prev.filter((ev) => ev.id !== id));
       if (selectedEvent?.id === id) setSelectedEvent(null);
     } catch (err: any) {
@@ -292,16 +304,15 @@ export const Trips: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase.from('transactions').insert([
+      // Insere na tabela event_expenses com expense_date
+      const { error } = await supabase.from('event_expenses').insert([
         {
           user_id: userId,
           event_id: selectedEvent.id,
           description: manualDesc.trim(),
           amount: parsedAmount,
-          type: 'expense',
-          date: manualDate,
-          is_settled: true,
-          budget_bucket: 'wants',
+          category: 'Geral',
+          expense_date: manualDate,
         },
       ]);
 
@@ -317,10 +328,13 @@ export const Trips: React.FC = () => {
     }
   };
 
-  const handleDeleteTransaction = async (id: string) => {
+const handleDeleteTransaction = async (id: string) => {
     if (!window.confirm('Deseja excluir este lançamento?')) return;
     try {
-      await supabase.from('transactions').delete().eq('id', id);
+      // Exclui de event_expenses
+      const { error } = await supabase.from('event_expenses').delete().eq('id', id);
+      if (error) throw error;
+
       if (selectedEvent) {
         fetchTransactionsForEvent(selectedEvent.id);
         if (userId) fetchEvents(userId);

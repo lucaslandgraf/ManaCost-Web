@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { ProductMatch, FlyerDeal, WeeklyFlyer } from '../types/database';
-import { cleanSearchText, parseSearchTokens } from '../utils/searchEngine';
+import { parseSearchTokens } from '../utils/searchEngine';
 
 export const CATALOG_PAGE_SIZE = 60;
 

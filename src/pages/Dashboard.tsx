@@ -19,11 +19,15 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  CheckSquare,
+  Square,
+  X,
 } from 'lucide-react';
 import { useMonth } from '../context/MonthContext';
 import { supabase } from '../services/supabase';
 import { TransactionModal } from '../components/modals/TransactionModal';
 import { PurchaseDetailsModal } from '../components/modals/PurchaseDetailsModal';
+import { RecurringDeleteModal } from '../components/modals/RecurringDeleteModal';
 
 type TransactionType = 'income' | 'expense';
 
@@ -34,6 +38,7 @@ interface DashboardTransaction {
   date: string | null;
   type: TransactionType;
   is_settled?: boolean;
+  repeats_monthly?: boolean;
   spent_for_name?: string | null;
   category_name?: string;
 }
@@ -95,40 +100,122 @@ export const Dashboard: React.FC = () => {
   // Modal de Detalhes da Compra / Lançamento
   const [selectedTx, setSelectedTx] = useState<DashboardTransaction | null>(null);
 
+  // Modal de Exclusão de Recorrência
+  const [recurringItemToDelete, setRecurringItemToDelete] = useState<DashboardTransaction | null>(null);
+
+  // Seleção múltipla para exclusão em lote
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
+
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
     setErrorMsg('');
 
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
-    const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+    const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const startDate = `${monthKey}-01`;
     const lastDay = new Date(year, month + 1, 0).getDate();
-    const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    const endDate = `${monthKey}-${String(lastDay).padStart(2, '0')}`;
 
     try {
-      const { data, error } = await supabase
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const { data: existingData, error: txError } = await supabase
         .from('transactions')
-        .select('id, description, amount, date, type, is_settled, spent_for_name, categories(name)')
+        .select('id, description, amount, date, type, is_settled, repeats_monthly, spent_for_name, categories(name)')
         .in('type', ['income', 'expense'])
         .gte('date', startDate)
         .lte('date', endDate)
         .order('date', { ascending: false })
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (txError) throw txError;
 
-      const mappedTransactions: DashboardTransaction[] = (data || []).map((t: any) => ({
+      let currentItems = existingData || [];
+
+      if (user) {
+        const { data: activeBills } = await supabase
+          .from('recurring_bills')
+          .select('id, description, amount, due_day, category_id, type, spent_for_name')
+          .eq('user_id', user.id)
+          .eq('is_active', true);
+
+        if (activeBills && activeBills.length > 0) {
+          const uniqueActiveBills = activeBills.filter((bill: any, index: number, self: any[]) =>
+            index === self.findIndex((b: any) =>
+              b.description?.trim().toLowerCase() === bill.description?.trim().toLowerCase()
+            )
+          );
+
+          const dismissed: string[] = JSON.parse(
+            localStorage.getItem(`dismissed_recurring_${user.id}_${monthKey}`) || '[]'
+          );
+          const dismissedSet = new Set(dismissed.map((d) => d.toLowerCase()));
+
+          const existingDescriptions = new Set(
+            currentItems.map((tx: any) => tx.description?.trim().toLowerCase())
+          );
+
+          const toAutoInsert: any[] = [];
+
+          for (const bill of uniqueActiveBills) {
+            const cleanDesc = bill.description?.trim().toLowerCase() || '';
+            const normalizedBill = cleanDesc.replace(/^aporte:\s*/i, '').trim();
+            const isAlreadyInTransactions = Array.from(existingDescriptions).some((desc) => {
+              const normalizedDesc = (desc || '').replace(/^aporte:\s*/i, '').trim();
+              return desc === cleanDesc || normalizedDesc === normalizedBill;
+            });
+
+            if (!isAlreadyInTransactions && !dismissedSet.has(cleanDesc)) {
+              const validDay = Math.min(bill.due_day || 1, lastDay);
+              const targetDate = `${monthKey}-${String(validDay).padStart(2, '0')}`;
+
+              toAutoInsert.push({
+                user_id: user.id,
+                description: bill.description.trim(),
+                amount: bill.amount,
+                type: bill.type || 'expense',
+                category_id: bill.category_id || null,
+                date: targetDate,
+                is_settled: false,
+                spent_for_name: bill.spent_for_name || null,
+                split_status: 'none',
+                repeats_monthly: true,
+              });
+
+              existingDescriptions.add(cleanDesc);
+            }
+          }
+
+          if (toAutoInsert.length > 0) {
+            const { data: insertedData, error: insError } = await supabase
+              .from('transactions')
+              .insert(toAutoInsert)
+              .select('id, description, amount, date, type, is_settled, repeats_monthly, spent_for_name, categories(name)');
+
+            if (!insError && insertedData) {
+              currentItems = [...insertedData, ...currentItems];
+            }
+          }
+        }
+      }
+
+      const mappedTransactions: DashboardTransaction[] = currentItems.map((t: any) => ({
         id: String(t.id),
         description: t.description?.trim() || 'Movimento sem descrição',
         amount: Number(t.amount) || 0,
         date: t.date,
         type: t.type,
         is_settled: t.is_settled ?? true,
+        repeats_monthly: Boolean(t.repeats_monthly),
         spent_for_name: t.spent_for_name || null,
         category_name: t.categories?.name || 'Geral',
       }));
 
       setTransactions(mappedTransactions);
+      setSelectedIds(new Set());
     } catch (error) {
       console.error('Erro ao carregar movimentos do painel:', error);
       setTransactions([]);
@@ -143,7 +230,9 @@ export const Dashboard: React.FC = () => {
   }, [currentDate]);
 
   useEffect(() => {
-    setCurrentPage(1); // Volta para a primeira página ao trocar de mês
+    setCurrentPage(1);
+    setIsSelectionMode(false);
+    setSelectedIds(new Set());
     void fetchTransactions();
   }, [fetchTransactions]);
 
@@ -156,14 +245,158 @@ export const Dashboard: React.FC = () => {
     await supabase.from('transactions').update({ is_settled: newStatus }).eq('id', id);
   };
 
-  const handleDeleteTransaction = async (id: string, desc: string, e?: React.MouseEvent) => {
+  const handleDeleteClick = async (transaction: DashboardTransaction, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!window.confirm(`Deseja remover "${desc}"?`)) return;
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
-    await supabase.from('transactions').delete().eq('id', id);
+
+    const { data: recBill } = await supabase
+      .from('recurring_bills')
+      .select('id, is_active')
+      .ilike('description', transaction.description.trim())
+      .maybeSingle();
+
+    const isRecurring = Boolean(transaction.repeats_monthly || recBill);
+
+    if (isRecurring) {
+      setRecurringItemToDelete(transaction);
+      return;
+    }
+
+    if (!window.confirm(`Deseja remover "${transaction.description}"?`)) return;
+    setTransactions((prev) => prev.filter((t) => t.id !== transaction.id));
+    await supabase.from('transactions').delete().eq('id', transaction.id);
   };
 
-  // Cálculos contábeis consideram 100% dos lançamentos do mês
+  const handleDeleteCurrentOnly = async () => {
+    if (!recurringItemToDelete) return;
+    const item = recurringItemToDelete;
+    setRecurringItemToDelete(null);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && item.date) {
+      const monthKey = item.date.substring(0, 7);
+      const storageKey = `dismissed_recurring_${user.id}_${monthKey}`;
+      const dismissed: string[] = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      dismissed.push(item.description.trim().toLowerCase());
+      localStorage.setItem(storageKey, JSON.stringify(dismissed));
+    }
+
+    setTransactions((prev) => prev.filter((t) => t.id !== item.id));
+    await supabase.from('transactions').delete().eq('id', item.id);
+  };
+
+  const handleDeleteFutureAndCancel = async () => {
+    if (!recurringItemToDelete) return;
+    const item = recurringItemToDelete;
+    setRecurringItemToDelete(null);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      await supabase
+        .from('recurring_bills')
+        .delete()
+        .ilike('description', item.description.trim());
+
+      await supabase.from('transactions').delete().eq('id', item.id);
+
+      if (user && item.date) {
+        await supabase
+          .from('transactions')
+          .delete()
+          .eq('user_id', user.id)
+          .ilike('description', item.description.trim())
+          .gt('date', item.date)
+          .eq('is_settled', false);
+      }
+
+      setTransactions((prev) => prev.filter((t) => t.id !== item.id));
+    } catch (err) {
+      console.error('Erro ao excluir recorrência:', err);
+    }
+  };
+
+  // Funções de Seleção Múltipla
+  const toggleSelectId = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllCurrentPage = () => {
+    const pageIds = paginatedTransactions.map((t) => t.id);
+    const allSelected = pageIds.every((id) => selectedIds.has(id));
+
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = async () => {
+    const idsToDelete = Array.from(selectedIds);
+    if (idsToDelete.length === 0) return;
+
+    if (!window.confirm(`Tem certeza que deseja excluir os ${idsToDelete.length} lançamentos selecionados? Assinaturas selecionadas também serão canceladas para não voltarem.`)) {
+      return;
+    }
+
+    setIsBatchDeleting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      // Identifica os itens que foram selecionados
+      const itemsToDelete = transactions.filter((t) => selectedIds.has(t.id));
+      const descriptions = itemsToDelete.map((t) => t.description.trim());
+
+      // 1. Apaga do recurring_bills para evitar que o molde ressuscite o item
+      if (descriptions.length > 0) {
+        await supabase
+          .from('recurring_bills')
+          .delete()
+          .in('description', descriptions);
+      }
+
+      // 2. Apaga os registros da tabela transactions
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .in('id', idsToDelete);
+
+      if (error) throw error;
+
+      // 3. Remove também transações futuras não efetivadas com essas descrições
+      if (user && descriptions.length > 0) {
+        await supabase
+          .from('transactions')
+          .delete()
+          .eq('user_id', user.id)
+          .in('description', descriptions)
+          .gte('date', `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-01`)
+          .eq('is_settled', false);
+      }
+
+      setTransactions((prev) => prev.filter((t) => !selectedIds.has(t.id)));
+      setSelectedIds(new Set());
+      setIsSelectionMode(false);
+    } catch (err: any) {
+      alert(`Falha ao excluir selecionados: ${err.message || 'Erro desconhecido'}`);
+    } finally {
+      setIsBatchDeleting(false);
+    }
+  };
+
   const incomeTotal = transactions
     .filter((t) => t.type === 'income')
     .reduce((total, t) => total + t.amount, 0);
@@ -172,12 +405,14 @@ export const Dashboard: React.FC = () => {
     .reduce((total, t) => total + t.amount, 0);
   const balance = incomeTotal - expenseTotal;
 
-  // Fatiamento apenas para exibição em tela
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE) || 1;
   const paginatedTransactions = transactions.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
   );
+  const isAllPageSelected =
+    paginatedTransactions.length > 0 &&
+    paginatedTransactions.every((transaction) => selectedIds.has(transaction.id));
 
   return (
     <div className="space-y-6">
@@ -242,8 +477,44 @@ export const Dashboard: React.FC = () => {
 
       <section className="rounded-2xl border border-[#1E293B] bg-[#131927] p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-[#F8FAFC]">Extrato de Movimentos</h2>
-          <span className="text-xs font-semibold text-[#64748B]">{transactions.length} lançamento(s)</span>
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-bold text-[#F8FAFC]">Extrato de Movimentos</h2>
+            <span className="text-xs font-semibold text-[#64748B]">{transactions.length} lançamento(s)</span>
+          </div>
+
+          {/* Botão de Alternar Modo de Seleção */}
+          {transactions.length > 0 && (
+            <div className="flex items-center gap-2">
+              {isSelectionMode ? (
+                <>
+                  <button
+                    onClick={handleSelectAllCurrentPage}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#0B0F19] border border-white/10 text-slate-300 hover:text-white transition"
+                  >
+                    {isAllPageSelected ? <CheckSquare size={13} className="text-emerald-400" /> : <Square size={13} />}
+                    {isAllPageSelected ? 'Desmarcar Página' : 'Selecionar Página'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsSelectionMode(false);
+                      setSelectedIds(new Set());
+                    }}
+                    className="p-1 text-slate-400 hover:text-white rounded-lg transition"
+                    title="Cancelar seleção"
+                  >
+                    <X size={16} />
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setIsSelectionMode(true)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#0B0F19] border border-white/5 text-slate-400 hover:text-slate-200 transition"
+                >
+                  Selecionar Vários
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -264,13 +535,38 @@ export const Dashboard: React.FC = () => {
             <div className="divide-y divide-[#1E293B]/60">
               {paginatedTransactions.map((transaction) => {
                 const isIncome = transaction.type === 'income';
+                const isChecked = selectedIds.has(transaction.id);
+
                 return (
                   <div
                     key={transaction.id}
-                    onClick={() => setSelectedTx(transaction)}
-                    className="flex items-center justify-between gap-4 py-3 hover:bg-[#1E293B]/30 px-2 rounded-xl transition cursor-pointer"
+                    onClick={() => {
+                      if (isSelectionMode) {
+                        toggleSelectId(transaction.id);
+                      } else {
+                        setSelectedTx(transaction);
+                      }
+                    }}
+                    className={`flex items-center justify-between gap-4 py-3 hover:bg-[#1E293B]/30 px-2 rounded-xl transition cursor-pointer ${
+                      isChecked ? 'bg-[#1E293B]/40' : ''
+                    }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
+                      {/* Checkbox em modo de seleção */}
+                      {isSelectionMode && (
+                        <button
+                          type="button"
+                          onClick={(e) => toggleSelectId(transaction.id, e)}
+                          className="shrink-0 p-1 text-slate-400 hover:text-white"
+                        >
+                          {isChecked ? (
+                            <CheckSquare size={16} className="text-emerald-400" />
+                          ) : (
+                            <Square size={16} className="text-slate-500" />
+                          )}
+                        </button>
+                      )}
+
                       <div className="w-8 h-8 rounded-lg bg-[#0B0F19] border border-white/5 flex items-center justify-center shrink-0">
                         {getTransactionIcon(transaction.description)}
                       </div>
@@ -318,13 +614,15 @@ export const Dashboard: React.FC = () => {
                         </button>
                       </div>
 
-                      <button
-                        onClick={(e) => handleDeleteTransaction(transaction.id, transaction.description, e)}
-                        className="p-1 text-[#64748B] hover:text-[#F43F5E] transition"
-                        title="Excluir lançamento"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      {!isSelectionMode && (
+                        <button
+                          onClick={(e) => handleDeleteClick(transaction, e)}
+                          className="p-1 text-[#64748B] hover:text-[#F43F5E] transition"
+                          title="Excluir lançamento"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -369,6 +667,27 @@ export const Dashboard: React.FC = () => {
         )}
       </section>
 
+      {/* Barra Flutuante de Ação em Lote */}
+      {isSelectionMode && selectedIds.size > 0 && (
+        <div className="fixed bottom-24 md:bottom-8 left-1/2 -translate-x-1/2 z-50 bg-[#131927] border border-rose-500/30 shadow-2xl rounded-2xl px-5 py-3 flex items-center gap-4 animate-fade-in">
+          <div className="text-xs">
+            <span className="font-bold text-slate-100">{selectedIds.size}</span>
+            <span className="text-slate-400 ml-1">selecionado(s)</span>
+          </div>
+
+          <div className="h-4 w-px bg-white/10" />
+
+          <button
+            onClick={handleDeleteSelected}
+            disabled={isBatchDeleting}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-slate-950 font-bold text-xs transition disabled:opacity-50"
+          >
+            {isBatchDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+            {isBatchDeleting ? 'Excluindo...' : 'Excluir Selecionados'}
+          </button>
+        </div>
+      )}
+
       {/* Modal de Criação Rápida */}
       <TransactionModal
         isOpen={isTxModalOpen}
@@ -393,11 +712,24 @@ export const Dashboard: React.FC = () => {
           onUpdated={() => {
             void fetchTransactions();
           }}
-          onDeleted={() => {
-            void fetchTransactions();
+          onDeleted={(deletedId?: string) => {
+            if (deletedId) {
+              setTransactions((prev) => prev.filter((t) => t.id !== deletedId));
+            } else {
+              void fetchTransactions();
+            }
           }}
         />
       )}
+
+      {/* Modal de Exclusão de Recorrência */}
+      <RecurringDeleteModal
+        isOpen={Boolean(recurringItemToDelete)}
+        description={recurringItemToDelete?.description || ''}
+        onClose={() => setRecurringItemToDelete(null)}
+        onDeleteCurrentOnly={handleDeleteCurrentOnly}
+        onDeleteFutureAndCancel={handleDeleteFutureAndCancel}
+      />
     </div>
   );
 };
