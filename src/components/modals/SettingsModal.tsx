@@ -3,13 +3,14 @@ import {
   X,
   Target,
   Shield,
-  Database,
+  FileSpreadsheet,
   LogOut,
   CheckCircle2,
   AlertCircle,
   Loader2,
   Lock,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { supabase } from '../../services/supabase';
 
 interface SettingsModalProps {
@@ -48,7 +49,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Segurança e utilitários
   const [newPassword, setNewPassword] = useState('');
   const [updatingPassword, setUpdatingPassword] = useState(false);
-  const [generatingBackup, setGeneratingBackup] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
@@ -164,35 +165,96 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleBackup = async () => {
+  const handleExportExcel = async () => {
     if (!userId) return;
-    setGeneratingBackup(true);
+    setExportingExcel(true);
+    setFeedbackMsg(null);
+
     try {
-      const [txRes, purRes, billsRes] = await Promise.all([
-        supabase.from('transactions').select('*').eq('user_id', userId),
-        supabase.from('purchases').select('*, purchase_items(*)').eq('user_id', userId),
-        supabase.from('recurring_bills').select('*').eq('user_id', userId),
+      // 1. Busca os registos de todas as tabelas principais
+      const [txRes, recRes, billsRes, eventsRes] = await Promise.all([
+        supabase
+          .from('transactions')
+          .select('date, description, amount, type, is_settled, budget_bucket, spent_for_name, categories(name)')
+          .eq('user_id', userId)
+          .order('date', { ascending: false }),
+
+        supabase
+          .from('recurring_bills')
+          .select('description, amount, due_day, type, is_active, categories(name)')
+          .eq('user_id', userId)
+          .order('due_day', { ascending: true }),
+
+        supabase
+          .from('bills_to_pay')
+          .select('title, amount, due_date, is_paid, barcode_or_pix')
+          .eq('user_id', userId)
+          .order('due_date', { ascending: false }),
+
+        supabase
+          .from('budget_events')
+          .select('title, target_budget, currency, is_archived, created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false }),
       ]);
 
-      const backupData = {
-        exported_at: new Date().toISOString(),
-        user_id: userId,
-        transactions: txRes.data || [],
-        purchases: purRes.data || [],
-        recurring_bills: billsRes.data || [],
-      };
+      const wb = XLSX.utils.book_new();
 
-      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `manacost_backup_${new Date().toISOString().split('T')[0]}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
+      // Folha 1: Extrato de Transações
+      const txRows = (txRes.data || []).map((t: any) => ({
+        Data: t.date ? t.date.split('-').reverse().join('/') : '',
+        Descrição: t.description || '',
+        'Valor (R$)': Number(t.amount || 0),
+        Tipo: t.type === 'income' ? 'Receita' : 'Despesa',
+        Categoria: t.categories?.name || 'Geral',
+        Estado: t.is_settled ? 'Efetivado' : 'Pendente',
+        Orçamento: t.budget_bucket || 'Geral',
+        'Terceiro / Para': t.spent_for_name || '—',
+      }));
+      const wsTx = XLSX.utils.json_to_sheet(txRows);
+      XLSX.utils.book_append_sheet(wb, wsTx, 'Transações');
+
+      // Folha 2: Assinaturas & Contas Fixas
+      const recRows = (recRes.data || []).map((r: any) => ({
+        Descrição: r.description || '',
+        'Valor (R$)': Number(r.amount || 0),
+        'Dia Vencimento': r.due_day || 1,
+        Categoria: r.categories?.name || 'Geral',
+        Tipo: r.type === 'income' ? 'Receita' : 'Despesa',
+        Estado: r.is_active ? 'Ativa' : 'Pausada',
+      }));
+      const wsRec = XLSX.utils.json_to_sheet(recRows);
+      XLSX.utils.book_append_sheet(wb, wsRec, 'Assinaturas Fixas');
+
+      // Folha 3: Contas a Pagar / Boletos
+      const billsRows = (billsRes.data || []).map((b: any) => ({
+        Título: b.title || '',
+        'Valor (R$)': Number(b.amount || 0),
+        Vencimento: b.due_date ? b.due_date.split('-').reverse().join('/') : '',
+        Estado: b.is_paid ? 'Pago' : 'Pendente',
+        'Código / Pix': b.barcode_or_pix || '—',
+      }));
+      const wsBills = XLSX.utils.json_to_sheet(billsRows);
+      XLSX.utils.book_append_sheet(wb, wsBills, 'Contas a Pagar');
+
+      // Folha 4: Viagens & Eventos
+      const eventRows = (eventsRes.data || []).map((ev: any) => ({
+        Viagem: ev.title || '',
+        'Meta Orçamental': Number(ev.target_budget || 0),
+        Moeda: ev.currency || 'BRL',
+        Estado: ev.is_archived ? 'Concluída' : 'Em Andamento',
+      }));
+      const wsEvents = XLSX.utils.json_to_sheet(eventRows);
+      XLSX.utils.book_append_sheet(wb, wsEvents, 'Viagens');
+
+      // 2. Download do ficheiro Excel
+      const dateStr = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(wb, `ManaCost_Backup_${dateStr}.xlsx`);
+      setFeedbackMsg({ type: 'success', text: 'Cópia de segurança em Excel gerada com sucesso!' });
     } catch (err: any) {
-      setFeedbackMsg({ type: 'error', text: 'Falha ao descarregar cópia de segurança.' });
+      setFeedbackMsg({ type: 'error', text: err.message || 'Falha ao gerar cópia em Excel.' });
     } finally {
-      setGeneratingBackup(false);
+      setExportingExcel(false);
     }
   };
 
@@ -429,22 +491,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {/* Secção 3: Cópia de Segurança */}
               <div>
                 <div className="flex items-center gap-2 mb-2">
-                  <Database size={14} className="text-emerald-400" />
+                  <FileSpreadsheet size={14} className="text-emerald-400" />
                   <span className="text-[10px] font-bold tracking-wider uppercase text-slate-400">
                     Cópia de Segurança
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mb-3">
-                  Transfere todos os seus lançamentos, compras e contas recorrentes em ficheiro JSON
+                  Transfere todos os seus lançamentos, contas fixas, faturas e viagens organizados em folhas Excel (.xlsx)[cite: 20]
                 </p>
 
                 <button
-                  onClick={handleBackup}
-                  disabled={generatingBackup}
-                  className="w-full py-2.5 bg-[#131927] border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2"
+                  type="button"
+                  onClick={handleExportExcel}
+                  disabled={exportingExcel}
+                  className="w-full py-2.5 bg-[#131927] border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  {generatingBackup ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
-                  {generatingBackup ? 'A exportar dados...' : 'Exportar Dados (.json)'}
+                  {exportingExcel ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin text-emerald-400" />
+                      <span>A exportar dados para Excel...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileSpreadsheet size={14} />
+                      <span>Exportar Dados (.xlsx)</span>
+                    </>
+                  )}
                 </button>
               </div>
 
