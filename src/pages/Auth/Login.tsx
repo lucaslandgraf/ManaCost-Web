@@ -65,7 +65,10 @@ export const Login: React.FC = () => {
     setFeedback(null);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+
       if (error) {
         if (error.message.includes('For security purposes') || error.message.includes('after')) {
           const match = error.message.match(/\d+/);
@@ -108,7 +111,6 @@ export const Login: React.FC = () => {
             alt="ManaCost"
             className="w-14 h-14 mb-3 object-contain drop-shadow-[0_4px_16px_rgba(16,185,129,0.2)]"
             onError={(e) => {
-              // Se a imagem não for encontrada, esconde para não quebrar layout
               (e.target as HTMLElement).style.display = 'none';
             }}
           />
