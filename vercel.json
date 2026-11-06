@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/sefaz/(.*)",
+      "destination": "/api/sefaz"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },
