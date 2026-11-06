@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Configuração de cabeçalhos CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -15,7 +14,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // Permite tanto "local" quanto "geohash"
   const localCoords = req.query.local || req.query.geohash;
   const termo = req.query.termo;
 
@@ -24,7 +22,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Deteta se o pedido original vinha com /categorias ou /produtos
     const isCategorias = req.url?.includes('/categorias');
     const endpoint = isCategorias ? 'categorias' : 'produtos';
 
@@ -46,11 +43,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const response = await fetch(targetUrl.toString(), {
       method: 'GET',
       headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://menorpreco.notaparana.pr.gov.br/',
-        'Origin': 'https://menorpreco.notaparana.pr.gov.br',
+        'User-Agent': 'okhttp/4.9.2',
+        'Accept': 'application/json',
+        'Accept-Language': 'pt-BR,pt;q=0.9',
+        'Host': 'menorpreco.notaparana.pr.gov.br',
+        'Connection': 'Keep-Alive',
       },
     });
 
